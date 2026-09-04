@@ -49,6 +49,7 @@ public sealed class ManagementApiTests
         await client.PostAsJsonAsync("/providers", ProviderBody("secret"));
 
         var models = await client.GetFromJsonAsync<string[]>("/providers/primary/models");
+        Assert.NotNull(models);
         Assert.Equal(["model-a"], models);
 
         var health = await client.GetAsync("/providers/primary/health");

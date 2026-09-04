@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AiRouter.AspNetCore;
 using AiRouter.Providers;
 using AiRouter.Routing;
 using Microsoft.AspNetCore.Http;
@@ -8,13 +9,18 @@ namespace Microsoft.AspNetCore.Builder;
 
 public static class AiRouterEndpointRouteBuilderExtensions
 {
-    public static IEndpointRouteBuilder MapAiRouterOpenAiEndpoints(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapAiRouterOpenAiEndpoints(
+        this IEndpointRouteBuilder endpoints,
+        string? bearerKey = null)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPost("/v1/chat/completions", OpenAiEndpointHandlers.ChatAsync);
-        endpoints.MapPost("/v1/responses", OpenAiEndpointHandlers.ResponsesAsync);
-        endpoints.MapGet("/v1/models", OpenAiEndpointHandlers.ModelsAsync);
+        endpoints.MapPost("/v1/chat/completions", (HttpContext context, IAiRouter router) =>
+            OpenAiEndpointHandlers.ChatAsync(context, router, bearerKey));
+        endpoints.MapPost("/v1/responses", (HttpContext context, IAiRouter router) =>
+            OpenAiEndpointHandlers.ResponsesAsync(context, router, bearerKey));
+        endpoints.MapGet("/v1/models", (HttpContext context, IProviderManager providers, IRouteStore routes) =>
+            OpenAiEndpointHandlers.ModelsAsync(context, providers, routes, bearerKey));
 
         return endpoints;
     }
@@ -22,17 +28,28 @@ public static class AiRouterEndpointRouteBuilderExtensions
 
 internal static class OpenAiEndpointHandlers
 {
-    public static Task ChatAsync(HttpContext context, IAiRouter router) =>
-        RouteAsync(context, router.ChatAsync);
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static Task ResponsesAsync(HttpContext context, IAiRouter router) =>
-        RouteAsync(context, router.ResponsesAsync);
+    public static async Task ChatAsync(HttpContext context, IAiRouter router, string? bearerKey)
+    {
+        if (!await BearerKeyAuthorizer.RequireAsync(context, bearerKey).ConfigureAwait(false)) return;
+        await RouteAsync(context, router.ChatAsync).ConfigureAwait(false);
+    }
+
+    public static async Task ResponsesAsync(HttpContext context, IAiRouter router, string? bearerKey)
+    {
+        if (!await BearerKeyAuthorizer.RequireAsync(context, bearerKey).ConfigureAwait(false)) return;
+        await RouteAsync(context, router.ResponsesAsync).ConfigureAwait(false);
+    }
 
     public static async Task ModelsAsync(
         HttpContext context,
         IProviderManager providerManager,
-        IRouteStore routeStore)
+        IRouteStore routeStore,
+        string? bearerKey)
     {
+        if (!await BearerKeyAuthorizer.RequireAsync(context, bearerKey).ConfigureAwait(false)) return;
+
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var routes = await routeStore.ListAsync(context.RequestAborted).ConfigureAwait(false);
         foreach (var route in routes.Where(static route => route.Enabled))
@@ -80,11 +97,7 @@ internal static class OpenAiEndpointHandlers
             })
             .ToArray();
 
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new { @object = "list", data }),
-            context.RequestAborted).ConfigureAwait(false);
+        await WriteJsonAsync(context, StatusCodes.Status200OK, new { @object = "list", data }).ConfigureAwait(false);
     }
 
     private static async Task RouteAsync(
@@ -118,9 +131,7 @@ internal static class OpenAiEndpointHandlers
             }
 
             var model = modelElement.GetString()!;
-            var stream = root.TryGetProperty("stream", out var streamElement) &&
-                         streamElement.ValueKind == JsonValueKind.True;
-
+            var stream = root.TryGetProperty("stream", out var streamElement) && streamElement.ValueKind == JsonValueKind.True;
             var result = await send(model, root.Clone(), stream, context.RequestAborted).ConfigureAwait(false);
             await WriteRouterResultAsync(context, result).ConfigureAwait(false);
         }
@@ -136,7 +147,6 @@ internal static class OpenAiEndpointHandlers
                 ProviderFailureKind.RateLimited => "rate_limit_error",
                 _ => "server_error"
             };
-
             await WriteErrorAsync(
                 context,
                 result.StatusCode > 0 ? result.StatusCode : StatusCodes.Status500InternalServerError,
@@ -146,10 +156,8 @@ internal static class OpenAiEndpointHandlers
         }
 
         context.Response.StatusCode = result.StatusCode > 0 ? result.StatusCode : StatusCodes.Status200OK;
-        if (!string.IsNullOrWhiteSpace(result.ProviderId))
-            context.Response.Headers["X-AiRouter-Provider"] = result.ProviderId;
-        if (!string.IsNullOrWhiteSpace(result.Model))
-            context.Response.Headers["X-AiRouter-Model"] = result.Model;
+        if (!string.IsNullOrWhiteSpace(result.ProviderId)) context.Response.Headers["X-AiRouter-Provider"] = result.ProviderId;
+        if (!string.IsNullOrWhiteSpace(result.Model)) context.Response.Headers["X-AiRouter-Model"] = result.Model;
 
         if (result.Stream is not null)
         {
@@ -164,11 +172,8 @@ internal static class OpenAiEndpointHandlers
             await context.Response.WriteAsync(body.GetRawText(), context.RequestAborted).ConfigureAwait(false);
     }
 
-    private static async Task WriteErrorAsync(HttpContext context, int statusCode, string message, string type)
-    {
-        context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "application/json";
-        var payload = JsonSerializer.Serialize(new
+    private static Task WriteErrorAsync(HttpContext context, int statusCode, string message, string type) =>
+        WriteJsonAsync(context, statusCode, new
         {
             error = new
             {
@@ -178,6 +183,11 @@ internal static class OpenAiEndpointHandlers
                 code = (string?)null
             }
         });
-        await context.Response.WriteAsync(payload, context.RequestAborted).ConfigureAwait(false);
+
+    private static async Task WriteJsonAsync(HttpContext context, int statusCode, object value)
+    {
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(value, Json), context.RequestAborted).ConfigureAwait(false);
     }
 }
