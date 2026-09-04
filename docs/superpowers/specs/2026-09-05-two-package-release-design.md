@@ -106,10 +106,10 @@ Implementation should converge on the following public project/package model:
 
 ```text
 src/
-  AIRouter.Core/             -> NuGet: AIRouter.Core
-  AIRouter.AspNetCore/       -> NuGet: AIRouter.AspNetCore
-  AiRouter.Persistence.Sqlite/  internal, not packable
-  AiRouter.Server/              executable/container, not packable
+  AIRouter.Core/                -> NuGet: AIRouter.Core
+  AIRouter.AspNetCore/          -> NuGet: AIRouter.AspNetCore
+  AiRouter.Persistence.Sqlite/  -> internal, not packable
+  AiRouter.Server/              -> executable/container, not packable
 ```
 
 The existing `AiRouter.Providers.OpenAI` source is moved into `AIRouter.Core`, then the separate provider project is removed from the public dependency graph.
@@ -130,28 +130,38 @@ v0.1.0 -> AIRouter.Core 0.1.0
        -> AIRouter.AspNetCore 0.1.0
 ```
 
-Both packages are always built and published at the same version from the same commit. A release must not publish only one of the two packages.
+Both packages are always built from the same commit and released at the same version.
 
-`AIRouter.AspNetCore` must reference the matching version of `AIRouter.Core` in its generated NuGet dependency metadata.
+`AIRouter.AspNetCore` declares a dependency on the same release version of `AIRouter.Core` so the two public packages stay version-aligned.
 
 ## NuGet Trusted Publishing
 
 Publishing follows the existing `dhhieu113pro/roslyn-mcp` pattern and does not use a long-lived `NUGET_API_KEY` repository secret.
 
-The tag-only publish job uses:
+The dedicated release workflow is:
+
+```text
+.github/workflows/release.yml
+```
+
+The tag-only NuGet publish job uses:
 
 - `environment: production`,
 - `permissions: id-token: write`,
 - `NuGet/login` pinned to an immutable commit,
 - NuGet.org trusted publishing to obtain the temporary push credential.
 
-NuGet.org must have trusted-publisher entries for both `AIRouter.Core` and `AIRouter.AspNetCore` pointing to the AIRouter repository, the release workflow file, and the `production` GitHub environment.
+NuGet.org must have trusted-publisher entries for both `AIRouter.Core` and `AIRouter.AspNetCore` pointing to:
+
+- repository: `dhhieu113pro/ai-router`,
+- workflow: `.github/workflows/release.yml`,
+- environment: `production`.
 
 The workflow packages and validates artifacts before authentication/publish. The publish job downloads the already-verified `.nupkg` artifacts rather than repacking them.
 
 ## CI and Release Workflows
 
-### Normal CI
+### Normal CI — `.github/workflows/ci.yml`
 
 PRs and normal branch pushes run:
 
@@ -164,16 +174,21 @@ PRs and normal branch pushes run:
 
 This prevents release-only package failures.
 
-### Release on `v*` tags
+### Release — `.github/workflows/release.yml`
 
-A tag release runs the same verification and then, only after it succeeds:
+The release workflow triggers only for pushed `v*` tags.
 
-1. publish `AIRouter.Core` to NuGet.org via trusted publishing,
-2. publish `AIRouter.AspNetCore` to NuGet.org via trusted publishing,
-3. build the standalone server container,
-4. publish a multi-architecture image to GHCR.
+It first verifies that the tag points to a commit contained in `main`, derives and validates the semantic package version, and then runs the same build/test/pack/smoke checks as normal CI.
 
-Release tags must point to a commit contained in `main` before publishing.
+Only after verification succeeds does it:
+
+1. authenticate to NuGet.org through trusted publishing,
+2. push `AIRouter.Core`,
+3. push `AIRouter.AspNetCore`,
+4. build the standalone server container,
+5. publish the multi-architecture image to GHCR.
+
+The NuGet pushes use `--skip-duplicate` so a failed partial release is safely resumable. If Core is accepted by NuGet.org but the AspNetCore push fails, the release is marked failed and GHCR publishing does not run. Re-running the workflow skips the already-published Core version and publishes the missing AspNetCore package before continuing to GHCR.
 
 ## GHCR Container Publishing
 
@@ -205,8 +220,10 @@ The Docker image contains only the .NET server runtime/published application and
 ## Failure and Safety Rules
 
 - A failed test/package smoke test blocks both NuGet and GHCR publishing.
-- A failure publishing one NuGet package fails the release job; the workflow does not intentionally continue to publish an inconsistent release.
-- Tag parsing must reject invalid semantic versions.
+- A failed NuGet push blocks GHCR publishing.
+- A partially published NuGet release is recovered by rerunning the same tag workflow with `--skip-duplicate`; the workflow never repacks different bits for the same version.
+- Tag parsing rejects invalid semantic versions.
+- Release tags must point to commits contained in `main`.
 - Normal PR builds never authenticate to NuGet or push GHCR images.
 - NuGet trusted publishing credentials are short-lived and generated only in the tag publish job.
 - Provider API keys remain runtime configuration/data and are never baked into NuGet packages or container layers.
@@ -237,6 +254,7 @@ The architecture is complete when:
 - AspNetCore depends on Core and maps the `/v1` API without duplicating routing behavior,
 - both generated packages pass consumer smoke tests,
 - a valid `v*` tag can publish both packages using NuGet trusted publishing,
-- the same tag can publish the multi-arch standalone server image to GHCR,
+- the same successful tag release can publish the multi-arch standalone server image to GHCR,
+- partial NuGet publishing is safely resumable without changing package contents,
 - PR CI requires no publishing credentials,
 - build/test/pack verification is green with zero build warnings before PR #1 is marked ready for review.
