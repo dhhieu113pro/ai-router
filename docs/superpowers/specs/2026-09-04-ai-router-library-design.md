@@ -107,6 +107,7 @@ ProviderDefinition
 - Priority            lower value means earlier fallback preference
 - Timeout
 - Models[]             configured models when discovery is unavailable/disabled
+- DefaultModel         optional model used when the request names only the provider id
 - DiscoverModels       whether the adapter may use the upstream models endpoint
 - ExtraHeaders{}
 - ChatEndpoint         optional override
@@ -179,7 +180,7 @@ Required operations:
 
 Changes must become visible to new requests without restarting the process.
 
-Storage is represented by `IProviderStore`. `InMemoryProviderStore` is included in the core package. SQLite implements the same interface in `AiRouter.Persistence.Sqlite`.
+Storage is represented by `IProviderStore`. `InMemoryProviderStore` is included in the core package. Route persistence is represented separately by `IRouteStore`. SQLite implements both interfaces in `AiRouter.Persistence.Sqlite`.
 
 The core never depends on a management HTTP API; that API is only an ASP.NET adapter.
 
@@ -201,7 +202,7 @@ A pinned request does not silently move to another provider. This preserves call
 
 ### Provider target
 
-`{providerId}` selects that provider and lets the provider adapter/default configuration determine the model only when such a default is explicitly configured. Otherwise the router returns a validation error.
+`{providerId}` selects that provider and uses its configured `DefaultModel`. If no default model is configured, the router returns an OpenAI-style validation error.
 
 ### Logical route alias
 
@@ -374,14 +375,14 @@ Management DTOs redact provider credentials.
 
 Auth is a server/ASP.NET concern, not a core-library concern.
 
-The standalone server supports two optional bearer keys:
+The standalone server supports two bearer-key settings:
 
-- `AIROUTER_API_KEY` protects `/v1/*`,
-- `AIROUTER_ADMIN_KEY` protects provider/route management APIs.
+- `AIROUTER_API_KEY`: optional; when set, it protects `/v1/*`. When absent, the OpenAI-compatible gateway remains unauthenticated.
+- `AIROUTER_ADMIN_KEY`: required to enable the provider/route management API in the standalone server.
 
-If `AIROUTER_ADMIN_KEY` is absent, management endpoints bind only when explicitly enabled by server configuration; Docker defaults must not expose unauthenticated provider management on a public interface.
+If `AIROUTER_ADMIN_KEY` is absent, `AiRouter.Server` does not map `/providers` or `/routes` management endpoints. There is no standalone-server mode that exposes unauthenticated provider credentials or management writes.
 
-Embedded ASP.NET consumers may replace this with their own authentication/authorization policies.
+Embedded ASP.NET consumers may map management endpoints themselves and replace this behavior with their own authentication/authorization policies.
 
 ## Persistence
 
@@ -400,7 +401,7 @@ Schema migrations are owned by the persistence package and tested against empty 
 
 The standalone server supports bootstrapping providers/routes from configuration/environment and optional SQLite state.
 
-Persistent state wins for records with the same id. Configuration-only records are usable without requiring a DB write. Management writes go to the configured `IProviderStore`/route store.
+Persistent state wins for records with the same id. Configuration-only records are usable without requiring a DB write. Management writes go to the configured `IProviderStore`/`IRouteStore`.
 
 The core library itself does not assume `appsettings.json`.
 
