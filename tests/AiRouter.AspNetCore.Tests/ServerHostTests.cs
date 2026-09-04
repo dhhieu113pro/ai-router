@@ -53,18 +53,29 @@ public sealed class ServerHostTests
         }
         finally
         {
-            if (File.Exists(path)) File.Delete(path);
-            if (File.Exists(path + "-shm")) File.Delete(path + "-shm");
-            if (File.Exists(path + "-wal")) File.Delete(path + "-wal");
+            DeleteDatabase(path);
         }
     }
 
-    private static WebApplicationFactory<Program> Factory(params (string Key, string? Value)[] values) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private static WebApplicationFactory<Program> Factory(params (string Key, string? Value)[] values)
+    {
+        var settings = values.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        if (!settings.ContainsKey("AIROUTER_DATA_PATH"))
+            settings["AIROUTER_DATA_PATH"] = Path.Combine(Path.GetTempPath(), $"ai-router-test-{Guid.NewGuid():N}.db");
+
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, configuration) =>
             {
-                configuration.AddInMemoryCollection(values.ToDictionary(x => x.Key, x => x.Value));
+                configuration.AddInMemoryCollection(settings);
             });
         });
+    }
+
+    private static void DeleteDatabase(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(path + "-shm")) File.Delete(path + "-shm");
+        if (File.Exists(path + "-wal")) File.Delete(path + "-wal");
+    }
 }
