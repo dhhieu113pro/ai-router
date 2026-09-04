@@ -15,7 +15,8 @@ public sealed record ProviderDefinition(
     IReadOnlyDictionary<string, string>? ExtraHeaders = null,
     string? ChatEndpoint = null,
     string? ResponsesEndpoint = null,
-    string? ModelsEndpoint = null)
+    string? ModelsEndpoint = null,
+    bool SupportsNativeResponses = true)
 {
     public TimeSpan EffectiveTimeout => Timeout ?? TimeSpan.FromSeconds(120);
     public ProviderDefinition Redacted() => this with { ApiKey = null };
