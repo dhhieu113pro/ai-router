@@ -3,7 +3,7 @@ namespace AiRouter.Tests;
 public sealed class ArchitectureTests
 {
     [Fact]
-    public void Core_project_exists_and_has_no_web_persistence_or_ai_studio_dependencies()
+    public void Core_project_exists_and_has_no_web_persistence_server_or_ai_studio_dependencies()
     {
         var path = RepoPath("src/AiRouter/AiRouter.csproj");
         Assert.True(File.Exists(path), $"Missing core project: {path}");
@@ -12,6 +12,7 @@ public sealed class ArchitectureTests
         Assert.DoesNotContain("Microsoft.AspNetCore", xml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("EntityFrameworkCore", xml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Sqlite", xml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AiRouter.Server", xml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("AIStudio", xml, StringComparison.OrdinalIgnoreCase);
     }
 
