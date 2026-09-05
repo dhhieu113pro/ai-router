@@ -101,6 +101,16 @@ public sealed class PackagingTests
         Assert.DoesNotContain("OPENCODE_API_KEY", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Ci_normalizes_coverage_by_assembly_and_source_path_before_merging()
+    {
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/ci.yml"));
+
+        Assert.Contains("for package in root.findall(\"./packages/package\")", workflow, StringComparison.Ordinal);
+        Assert.Contains("normalized_filename", workflow, StringComparison.Ordinal);
+        Assert.Contains("key = (package_name, normalized_filename, number)", workflow, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
