@@ -10,8 +10,7 @@ builder.Services.AddSingleton(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
     var dataPath = configuration["AIROUTER_DATA_PATH"];
-    if (string.IsNullOrWhiteSpace(dataPath))
-        dataPath = "/data/ai-router.db";
+    dataPath = string.IsNullOrWhiteSpace(dataPath) ? "/data/ai-router.db" : dataPath;
 
     dataPath = Path.GetFullPath(dataPath);
     var dataDirectory = Path.GetDirectoryName(dataPath);
