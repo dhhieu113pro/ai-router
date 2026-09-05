@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -16,6 +17,24 @@ public sealed class ServerHostTests
 
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/providers")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Fresh_server_seeds_opencode_free_provider_without_api_key()
+    {
+        await using var factory = Factory();
+        var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/v1/models");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var ids = document.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("id").GetString())
+            .ToArray();
+
+        Assert.Contains("opencode-free/mimo-v2.5-free", ids);
     }
 
     [Fact]
