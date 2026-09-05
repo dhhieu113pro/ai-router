@@ -40,7 +40,6 @@ public sealed class AspNetCoverageEdgeTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/providers", JsonText("{"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/providers", JsonText("null"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/providers", ProviderBody("bad id", "https://unused.test"))).StatusCode);
-
         Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/providers", ProviderBody("primary", "https://unused.test"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/providers", ProviderBody("PRIMARY", "https://unused.test"))).StatusCode);
     }
@@ -73,6 +72,7 @@ public sealed class AspNetCoverageEdgeTests
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/providers/primary/enable", null)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/providers/primary/test", null)).StatusCode);
         var models = await client.GetFromJsonAsync<string[]>("/providers/primary/models");
+        Assert.NotNull(models);
         Assert.Equal(["model-a"], models);
     }
 
@@ -94,9 +94,7 @@ public sealed class AspNetCoverageEdgeTests
         await using var app = await StartManagementAsync(adminKey: "secret");
         var request = new HttpRequestMessage(HttpMethod.Get, "/providers");
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer ");
-
         var response = await app.GetTestClient().SendAsync(request);
-
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal("Bearer", response.Headers.WwwAuthenticate.Single().Scheme);
     }
@@ -106,7 +104,6 @@ public sealed class AspNetCoverageEdgeTests
     {
         await using var app = await StartOpenAiAsync(new StaticRouter(() => Success()));
         var client = app.GetTestClient();
-
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/v1/chat/completions", JsonText("{"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/v1/chat/completions", new { model = 7, messages = Array.Empty<object>() })).StatusCode);
     }
@@ -119,10 +116,8 @@ public sealed class AspNetCoverageEdgeTests
     {
         var router = new StaticRouter(() => new RouterResult { Success = false, StatusCode = status, FailureKind = kind });
         await using var app = await StartOpenAiAsync(router);
-
         var response = await app.GetTestClient().PostAsJsonAsync("/v1/chat/completions", new { model = "m", messages = Array.Empty<object>() });
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-
         Assert.Equal(status > 0 ? status : 500, (int)response.StatusCode);
         Assert.Equal(expectedType, body.RootElement.GetProperty("error").GetProperty("type").GetString());
         Assert.False(string.IsNullOrWhiteSpace(body.RootElement.GetProperty("error").GetProperty("message").GetString()));
@@ -133,7 +128,6 @@ public sealed class AspNetCoverageEdgeTests
     {
         await using var app = await StartOpenAiAsync(new StaticRouter(() => new RouterResult { Success = true, StatusCode = 0 }));
         var response = await app.GetTestClient().PostAsJsonAsync("/v1/chat/completions", new { model = "m", messages = Array.Empty<object>() });
-
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(response.Headers.Contains("X-AiRouter-Provider"));
         Assert.False(response.Headers.Contains("X-AiRouter-Model"));
@@ -143,16 +137,9 @@ public sealed class AspNetCoverageEdgeTests
     [Fact]
     public async Task OpenAi_stream_without_content_type_uses_sse_default()
     {
-        var router = new StaticRouter(() => new RouterResult
-        {
-            Success = true,
-            StatusCode = 200,
-            Stream = new MemoryStream(Encoding.UTF8.GetBytes("data: ok\n\n"))
-        });
+        var router = new StaticRouter(() => new RouterResult { Success = true, StatusCode = 200, Stream = new MemoryStream(Encoding.UTF8.GetBytes("data: ok\n\n")) });
         await using var app = await StartOpenAiAsync(router);
-
         var response = await app.GetTestClient().PostAsJsonAsync("/v1/chat/completions", new { model = "m", stream = true, messages = Array.Empty<object>() });
-
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType!.MediaType);
         Assert.Equal("data: ok\n\n", await response.Content.ReadAsStringAsync());
     }
@@ -167,37 +154,15 @@ public sealed class AspNetCoverageEdgeTests
         };
         var manager = new DiscoveryManager(definitions);
         await using var app = await StartOpenAiAsync(new StaticRouter(() => Success()), manager);
-
         var response = await app.GetTestClient().GetFromJsonAsync<JsonElement>("/v1/models");
         var ids = response.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("id").GetString()).ToArray();
-
         Assert.Contains("good/discovered", ids);
         Assert.Contains("all", ids);
         Assert.DoesNotContain("bad/discovered", ids);
     }
 
-    private static object ProviderBody(string id, string baseUrl) => new
-    {
-        id,
-        name = id,
-        type = "fake",
-        baseUrl,
-        apiKey = (string?)null,
-        enabled = true,
-        models = new[] { "model-a" },
-        defaultModel = "model-a",
-        discoverModels = false,
-        supportsNativeResponses = true
-    };
-
-    private static object RouteBody(string id) => new
-    {
-        id,
-        strategy = 0,
-        targets = new[] { new { providerId = "primary", model = "model-a", priority = 1, enabled = true } },
-        enabled = true
-    };
-
+    private static object ProviderBody(string id, string baseUrl) => new { id, name = id, type = "fake", baseUrl, apiKey = (string?)null, enabled = true, models = new[] { "model-a" }, defaultModel = "model-a", discoverModels = false, supportsNativeResponses = true };
+    private static object RouteBody(string id) => new { id, strategy = 0, targets = new[] { new { providerId = "primary", model = "model-a", priority = 1, enabled = true } }, enabled = true };
     private static StringContent JsonText(string text) => new(text, Encoding.UTF8, "application/json");
 
     private static async Task<WebApplication> StartManagementAsync(string? adminKey = null)
@@ -262,7 +227,6 @@ public sealed class AspNetCoverageEdgeTests
         public Task DeleteAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ProviderDefinition> SetEnabledAsync(string id, bool enabled, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ProviderConnectivityResult> TestAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<string>> ListModelsAsync(string id, CancellationToken ct = default) =>
-            id == "bad" ? throw new InvalidOperationException("discovery failed") : Task.FromResult<IReadOnlyList<string>>(["discovered"]);
+        public Task<IReadOnlyList<string>> ListModelsAsync(string id, CancellationToken ct = default) => id == "bad" ? throw new InvalidOperationException("discovery failed") : Task.FromResult<IReadOnlyList<string>>(["discovered"]);
     }
 }
