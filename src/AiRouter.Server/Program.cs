@@ -9,14 +9,8 @@ builder.Services.AddAiRouter();
 builder.Services.AddSingleton(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
-    var dataPath = configuration["AIROUTER_DATA_PATH"];
-    dataPath = string.IsNullOrWhiteSpace(dataPath) ? "/data/ai-router.db" : dataPath;
-
-    dataPath = Path.GetFullPath(dataPath);
-    var dataDirectory = Path.GetDirectoryName(dataPath);
-    if (!string.IsNullOrWhiteSpace(dataDirectory))
-        Directory.CreateDirectory(dataDirectory);
-
+    var dataPath = ServerDataPath.Resolve(configuration["AIROUTER_DATA_PATH"]);
+    Directory.CreateDirectory(Path.GetDirectoryName(dataPath)!);
     return new SqliteStoreOptions($"Data Source={dataPath}");
 });
 builder.Services.AddSingleton<IProviderStore, SqliteProviderStore>();
