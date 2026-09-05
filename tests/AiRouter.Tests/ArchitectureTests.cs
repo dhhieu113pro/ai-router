@@ -17,15 +17,16 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void Server_references_only_router_adapters()
+    public void Server_references_core_web_adapter_and_internal_persistence_only()
     {
         var path = RepoPath("src/AiRouter.Server/AiRouter.Server.csproj");
         Assert.True(File.Exists(path), $"Missing server project: {path}");
 
         var xml = File.ReadAllText(path);
+        Assert.Contains("../AiRouter/AiRouter.csproj", xml, StringComparison.Ordinal);
         Assert.Contains("AiRouter.AspNetCore", xml, StringComparison.Ordinal);
         Assert.Contains("AiRouter.Persistence.Sqlite", xml, StringComparison.Ordinal);
-        Assert.Contains("AiRouter.Providers.OpenAI", xml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AiRouter.Providers.OpenAI", xml, StringComparison.Ordinal);
         Assert.DoesNotContain("AIStudio", xml, StringComparison.OrdinalIgnoreCase);
     }
 
