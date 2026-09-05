@@ -44,6 +44,18 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("/health", ci, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Prerelease_container_tags_do_not_move_stable_aliases()
+    {
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/release.yml"));
+
+        Assert.Contains("is_prerelease: ${{ steps.version.outputs.is_prerelease }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("if: needs.package.outputs.is_prerelease == 'false'", workflow, StringComparison.Ordinal);
+        Assert.Contains("if: needs.package.outputs.is_prerelease == 'true'", workflow, StringComparison.Ordinal);
+        Assert.Contains("Build and publish stable multi-arch image", workflow, StringComparison.Ordinal);
+        Assert.Contains("Build and publish prerelease multi-arch image", workflow, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
