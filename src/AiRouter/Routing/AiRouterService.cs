@@ -64,7 +64,7 @@ public sealed class AiRouterService : IAiRouter
 
         var eligible = resolved.Where(item => !IsCoolingDown(item.Provider)).ToArray();
         if (eligible.Length == 0)
-            eligible = resolved; // last-resort pass when every target is cooling down
+            eligible = resolved;
 
         if (route.Strategy == RoutingStrategy.RoundRobin && !route.Pinned && eligible.Length > 1)
         {
@@ -119,9 +119,7 @@ public sealed class AiRouterService : IAiRouter
                 break;
         }
 
-        return lastResponse is not null
-            ? Map(lastResponse, lastTarget!)
-            : Unavailable("All providers are unavailable.");
+        return Map(lastResponse!, lastTarget!);
     }
 
     private IAiProvider? FindProvider(string id) => _providers.Snapshot.FirstOrDefault(provider =>
