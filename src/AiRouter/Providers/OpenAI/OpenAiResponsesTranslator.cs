@@ -190,7 +190,7 @@ public sealed class OpenAiResponsesTranslator
             if (!message.TryGetProperty("content", out var content))
                 continue;
 
-            return content.ValueKind == JsonValueKind.String ? content.GetString() ?? string.Empty : content.GetRawText();
+            return content.ValueKind == JsonValueKind.String ? content.GetString()! : content.GetRawText();
         }
 
         return string.Empty;

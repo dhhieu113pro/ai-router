@@ -1,7 +1,19 @@
+FROM node:24-alpine AS admin-build
+WORKDIR /src/src/AiRouter.Admin
+
+COPY src/AiRouter.Admin/package.json ./
+RUN npm install --no-audit --no-fund
+
+COPY src/AiRouter.Admin/ ./
+RUN npm test
+RUN npm run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY . .
+COPY --from=admin-build /src/src/AiRouter.Admin/dist/ai-router-admin/browser ./src/AiRouter.Server/wwwroot/admin
+
 RUN dotnet restore src/AiRouter.Server/AiRouter.Server.csproj
 RUN dotnet publish src/AiRouter.Server/AiRouter.Server.csproj \
     --configuration Release \

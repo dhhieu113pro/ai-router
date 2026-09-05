@@ -9,14 +9,8 @@ builder.Services.AddAiRouter();
 builder.Services.AddSingleton(sp =>
 {
     var configuration = sp.GetRequiredService<IConfiguration>();
-    var dataPath = configuration["AIROUTER_DATA_PATH"];
-    dataPath = string.IsNullOrWhiteSpace(dataPath) ? "/data/ai-router.db" : dataPath;
-
-    dataPath = Path.GetFullPath(dataPath);
-    var dataDirectory = Path.GetDirectoryName(dataPath);
-    if (!string.IsNullOrWhiteSpace(dataDirectory))
-        Directory.CreateDirectory(dataDirectory);
-
+    var dataPath = ServerDataPath.Resolve(configuration["AIROUTER_DATA_PATH"]);
+    Directory.CreateDirectory(Path.GetDirectoryName(dataPath)!);
     return new SqliteStoreOptions($"Data Source={dataPath}");
 });
 builder.Services.AddSingleton<IProviderStore, SqliteProviderStore>();
@@ -41,12 +35,20 @@ if ((await providerManager.ListAsync()).Count == 0)
         SupportsNativeResponses: false));
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.UseAiRouter(bearerKey: app.Configuration["AIROUTER_API_KEY"]);
 
 var adminKey = app.Configuration["AIROUTER_ADMIN_KEY"];
 if (!string.IsNullOrWhiteSpace(adminKey))
+{
     app.MapAiRouterManagementEndpoints(adminKey);
+    app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+}
+
+app.MapFallbackToFile("/admin/{*path:nonfile}", "admin/index.html");
 
 app.Run();
 
