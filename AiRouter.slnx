@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AiRouter/AiRouter.csproj" />
+    <Project Path="src/AiRouter.Persistence.Sqlite/AiRouter.Persistence.Sqlite.csproj" />
+    <Project Path="src/AiRouter.AspNetCore/AiRouter.AspNetCore.csproj" />
+    <Project Path="src/AiRouter.Server/AiRouter.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiRouter.Tests/AiRouter.Tests.csproj" />
+    <Project Path="tests/AiRouter.Providers.OpenAI.Tests/AiRouter.Providers.OpenAI.Tests.csproj" />
+    <Project Path="tests/AiRouter.Persistence.Sqlite.Tests/AiRouter.Persistence.Sqlite.Tests.csproj" />
+    <Project Path="tests/AiRouter.AspNetCore.Tests/AiRouter.AspNetCore.Tests.csproj" />
+  </Folder>
+</Solution>

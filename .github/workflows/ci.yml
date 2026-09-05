@@ -1,0 +1,194 @@
+name: Build, Test, Pack & Container
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine CI package version
+        id: version
+        shell: bash
+        run: echo "version=0.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore AiRouter.slnx
+
+      - name: Build
+        run: dotnet build AiRouter.slnx --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: >-
+          dotnet test AiRouter.slnx
+          --configuration Release
+          --no-build
+          --settings coverlet.runsettings
+          --collect:"XPlat Code Coverage"
+          --results-directory artifacts/coverage
+
+      - name: Report and enforce line coverage
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          reports = list(Path("artifacts/coverage").rglob("coverage.cobertura.xml"))
+          if not reports:
+              raise SystemExit("No coverage.cobertura.xml reports were produced.")
+
+          lines = {}
+          for report in reports:
+              root = ET.parse(report).getroot()
+              for package in root.findall("./packages/package"):
+                  package_name = package.attrib["name"]
+                  prefix = package_name + "/"
+                  for cls in package.findall(".//class"):
+                      filename = cls.attrib.get("filename")
+                      if not filename:
+                          continue
+                      normalized_filename = filename[len(prefix):] if filename.startswith(prefix) else filename
+                      for line in cls.findall("./lines/line"):
+                          number = int(line.attrib["number"])
+                          hits = int(line.attrib.get("hits", "0"))
+                          key = (package_name, normalized_filename, number)
+                          lines[key] = max(lines.get(key, 0), hits)
+
+          total = len(lines)
+          covered = sum(1 for hits in lines.values() if hits > 0)
+          percentage = 100.0 * covered / total if total else 0.0
+          summary = f"Line coverage: {percentage:.2f}% ({covered}/{total})"
+          print(summary)
+          Path("artifacts/coverage/summary.txt").write_text(summary + "\n", encoding="utf-8")
+
+          if covered != total:
+              uncovered = sorted(key for key, hits in lines.items() if hits == 0)
+              for package_name, filename, number in uncovered:
+                  print(f"UNCOVERED {package_name}/{filename}:{number}")
+              raise SystemExit(
+                  f"Coverage gate failed: expected 100.00% line coverage, got {percentage:.2f}% ({covered}/{total})."
+              )
+          PY
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.run_number }}
+          path: |
+            artifacts/coverage/**/coverage.cobertura.xml
+            artifacts/coverage/summary.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Pack AIRouter.Core
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          dotnet pack src/AiRouter/AiRouter.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --output artifacts/packages
+          -p:Version="$PACKAGE_VERSION"
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Pack AIRouter.AspNetCore
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          dotnet pack src/AiRouter.AspNetCore/AiRouter.AspNetCore.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --output artifacts/packages
+          -p:Version="$PACKAGE_VERSION"
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Smoke test NuGet packages
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/test-packages.sh artifacts/packages "$PACKAGE_VERSION"
+
+      - name: Upload NuGet packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-${{ steps.version.outputs.version }}
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build container
+        run: docker build --tag ai-router:ci .
+
+      - name: Smoke test container health
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 18080:8080 ai-router:ci)"
+          cleanup() { docker rm --force "$container_id" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              echo "AIRouter container health check passed."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "$container_id"
+          exit 1
+
+      - name: Live smoke test default OpenCode provider without API key
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 18080:8080 ai-router:ci)"
+          cleanup() { docker rm --force "$container_id" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          payload='{"model":"opencode-free/mimo-v2.5-free","messages":[{"role":"user","content":"Reply with OK only."}],"max_tokens":8,"stream":false}'
+          for attempt in {1..4}; do
+            status="$(curl --silent --show-error --max-time 90 --output /tmp/opencode-response.json --write-out '%{http_code}' \
+              --header 'Content-Type: application/json' \
+              --data "$payload" \
+              http://127.0.0.1:18080/v1/chat/completions || true)"
+
+            if [[ "$status" =~ ^2 ]]; then
+              python3 - <<'PY'
+          import json
+          with open('/tmp/opencode-response.json', encoding='utf-8') as handle:
+              body = json.load(handle)
+          if not body.get('choices'):
+              raise SystemExit(f"OpenCode response has no choices: {body}")
+          print("OpenCode no-key live chat smoke passed.")
+          PY
+              exit 0
+            fi
+
+            echo "OpenCode smoke attempt ${attempt} returned HTTP ${status}:"
+            cat /tmp/opencode-response.json || true
+            echo
+            sleep $((attempt * 5))
+          done
+
+          docker logs "$container_id"
+          exit 1
