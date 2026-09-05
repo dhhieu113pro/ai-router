@@ -38,6 +38,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       major_minor: ${{ steps.version.outputs.major_minor }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -61,8 +62,15 @@ jobs:
           IFS='.' read -r major minor patch <<< "$core_version"
           major_minor="$major.$minor"
 
+          if [[ "$version" == *-* ]]; then
+            is_prerelease=true
+          else
+            is_prerelease=false
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "major_minor=$major_minor" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Require release tag to point to main
         run: |
@@ -182,7 +190,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish multi-arch image
+      - name: Build and publish stable multi-arch image
+        if: needs.package.outputs.is_prerelease == 'false'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -192,3 +201,12 @@ jobs:
             ghcr.io/dhhieu113pro/ai-router:${{ needs.package.outputs.version }}
             ghcr.io/dhhieu113pro/ai-router:${{ needs.package.outputs.major_minor }}
             ghcr.io/dhhieu113pro/ai-router:latest
+
+      - name: Build and publish prerelease multi-arch image
+        if: needs.package.outputs.is_prerelease == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/dhhieu113pro/ai-router:${{ needs.package.outputs.version }}
