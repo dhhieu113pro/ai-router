@@ -187,23 +187,35 @@ Your host owns URLs, auth, DTOs, telemetry, and lifecycle; AIRouter owns provide
 
 ## 7. Host OpenAI-compatible `/v1`
 
-With `AIRouter.AspNetCore`:
+With `AIRouter.AspNetCore`, the common setup is only `AddAiRouter()` plus `UseAiRouter()`:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services
-    .AddAiRouter()
-    .AddAiRouterAspNetCore();
+builder.Services.AddAiRouter();
 
 var app = builder.Build();
-app.MapAiRouterOpenAiEndpoints();
+app.UseAiRouter();
 app.Run();
 ```
 
 Existing OpenAI-compatible SDKs can point their base URL at your application.
 
-Management endpoints are opt-in and separate:
+To host AIRouter below another path, pass a prefix:
+
+```csharp
+app.UseAiRouter("api");
+```
+
+This maps the same OpenAI-compatible endpoints at `/api/v1/chat/completions`, `/api/v1/responses`, and `/api/v1/models`. Prefixes are normalized, so `api`, `/api`, `api/`, and `/api/` behave the same.
+
+Bearer-key protection is still available when needed:
+
+```csharp
+app.UseAiRouter("api", bearerKey: configuration["AIROUTER_API_KEY"]);
+```
+
+Management endpoints remain opt-in and separate:
 
 ```csharp
 app.MapAiRouterManagementEndpoints(adminKey);
