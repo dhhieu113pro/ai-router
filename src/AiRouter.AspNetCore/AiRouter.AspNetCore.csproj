@@ -5,10 +5,14 @@
     <Description>ASP.NET Core OpenAI-compatible hosting adapter for AIRouter.Core.</Description>
     <RepositoryUrl>https://github.com/dhhieu113pro/ai-router</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../AiRouter/AiRouter.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
