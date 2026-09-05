@@ -119,8 +119,8 @@ public sealed class AiRouterService : IAiRouter
                 break;
         }
 
-        return lastResponse is not null && lastTarget is not null
-            ? Map(lastResponse, lastTarget)
+        return lastResponse is not null
+            ? Map(lastResponse, lastTarget!)
             : Unavailable("All providers are unavailable.");
     }
 
