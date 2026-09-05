@@ -50,15 +50,19 @@ jobs:
           lines = {}
           for report in reports:
               root = ET.parse(report).getroot()
-              for cls in root.findall(".//class"):
-                  filename = cls.attrib.get("filename")
-                  if not filename:
-                      continue
-                  for line in cls.findall("./lines/line"):
-                      number = int(line.attrib["number"])
-                      hits = int(line.attrib.get("hits", "0"))
-                      key = (filename, number)
-                      lines[key] = max(lines.get(key, 0), hits)
+              for package in root.findall("./packages/package"):
+                  package_name = package.attrib["name"]
+                  prefix = package_name + "/"
+                  for cls in package.findall(".//class"):
+                      filename = cls.attrib.get("filename")
+                      if not filename:
+                          continue
+                      normalized_filename = filename[len(prefix):] if filename.startswith(prefix) else filename
+                      for line in cls.findall("./lines/line"):
+                          number = int(line.attrib["number"])
+                          hits = int(line.attrib.get("hits", "0"))
+                          key = (package_name, normalized_filename, number)
+                          lines[key] = max(lines.get(key, 0), hits)
 
           total = len(lines)
           covered = sum(1 for hits in lines.values() if hits > 0)
