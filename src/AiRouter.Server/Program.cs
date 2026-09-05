@@ -27,7 +27,21 @@ builder.Services.AddAiRouterAspNetCore();
 
 var app = builder.Build();
 
-await app.Services.GetRequiredService<IProviderManager>().InitializeAsync();
+var providerManager = app.Services.GetRequiredService<IProviderManager>();
+await providerManager.InitializeAsync();
+if ((await providerManager.ListAsync()).Count == 0)
+{
+    await providerManager.AddAsync(new ProviderDefinition(
+        Id: "opencode-free",
+        Name: "OpenCode Free",
+        Type: "openai-compatible",
+        BaseUrl: "https://opencode.ai/inference/openai/v1/",
+        ApiKey: null,
+        Models: ["mimo-v2.5-free"],
+        DefaultModel: "mimo-v2.5-free",
+        DiscoverModels: false,
+        SupportsNativeResponses: false));
+}
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapAiRouterOpenAiEndpoints(app.Configuration["AIROUTER_API_KEY"]);
