@@ -48,7 +48,7 @@ public sealed class OpenAiBranchCoverageTests
     [Fact]
     public async Task Empty_upstream_error_without_reason_uses_default_message()
     {
-        var provider = Create(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        var provider = Create(new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)599)
         {
             ReasonPhrase = null,
             Content = new StringContent(string.Empty)
