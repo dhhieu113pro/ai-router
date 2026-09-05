@@ -23,6 +23,27 @@ public sealed class ReleaseWorkflowTests
         Assert.Contains("actions/download-artifact@v7", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Release_workflow_publishes_multiarch_server_container_to_ghcr()
+    {
+        var dockerfile = RepoPath("Dockerfile");
+        Assert.True(File.Exists(dockerfile), "Dockerfile must exist.");
+
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/release.yml"));
+        var ci = File.ReadAllText(RepoPath(".github/workflows/ci.yml"));
+
+        Assert.Contains("packages: write", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker/setup-qemu-action@v3", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker/setup-buildx-action@v3", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker/login-action@v3", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker/build-push-action@v6", workflow, StringComparison.Ordinal);
+        Assert.Contains("ghcr.io/dhhieu113pro/ai-router", workflow, StringComparison.Ordinal);
+        Assert.Contains("linux/amd64,linux/arm64", workflow, StringComparison.Ordinal);
+        Assert.Contains("secrets.GITHUB_TOKEN", workflow, StringComparison.Ordinal);
+        Assert.Contains("docker build", ci, StringComparison.Ordinal);
+        Assert.Contains("/health", ci, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
