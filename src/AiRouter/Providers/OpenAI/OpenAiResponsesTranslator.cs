@@ -201,7 +201,12 @@ public sealed class OpenAiResponsesTranslator
         if (!chatResponse.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
             return null;
 
-        int? Read(string name) => usage.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : null;
+        int? Read(string name) =>
+            usage.TryGetProperty(name, out var value) &&
+            value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out var number)
+                ? number
+                : null;
 
         return new
         {
