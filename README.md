@@ -1,5 +1,9 @@
 # AIRouter
 
+[![NuGet AIRouter.Core](https://img.shields.io/nuget/v/AIRouter.Core.svg?label=AIRouter.Core)](https://www.nuget.org/packages/AIRouter.Core)
+[![NuGet AIRouter.AspNetCore](https://img.shields.io/nuget/v/AIRouter.AspNetCore.svg?label=AIRouter.AspNetCore)](https://www.nuget.org/packages/AIRouter.AspNetCore)
+[![GHCR](https://img.shields.io/badge/GHCR-ai--router-2496ED?logo=github)](https://github.com/dhhieu113pro/ai-router/pkgs/container/ai-router)
+
 AIRouter is a library-first AI provider router for .NET 10. Use it directly from any .NET application, optionally expose an OpenAI-compatible `/v1` API from your own ASP.NET Core host, or run the ready-made `AiRouter.Server` gateway/container with its bundled Angular admin console.
 
 ## Packages
@@ -8,10 +12,16 @@ There are exactly two public NuGet packages.
 
 ### AIRouter.Core
 
+[View `AIRouter.Core` on NuGet.org](https://www.nuget.org/packages/AIRouter.Core)
+
 Use `AIRouter.Core` in console apps, workers, Windows services, desktop apps, MCP servers, or any other .NET project. Core includes provider management, built-in OpenAI-compatible upstream providers, fallback and round-robin routing, Responses support, streaming, health/cooldown behavior, and in-memory provider/route stores.
 
+```bash
+dotnet add package AIRouter.Core --version 0.0.1
+```
+
 ```xml
-<PackageReference Include="AIRouter.Core" Version="0.1.0" />
+<PackageReference Include="AIRouter.Core" Version="0.0.1" />
 ```
 
 ```csharp
@@ -27,26 +37,38 @@ SQLite is not required. Applications can keep the default in-memory stores or re
 
 ### AIRouter.AspNetCore
 
+[View `AIRouter.AspNetCore` on NuGet.org](https://www.nuget.org/packages/AIRouter.AspNetCore)
+
 Add `AIRouter.AspNetCore` when your application should expose the OpenAI-compatible API. It depends on `AIRouter.Core` and only adds ASP.NET Core hosting integration.
 
+```bash
+dotnet add package AIRouter.AspNetCore --version 0.0.1
+```
+
 ```xml
-<PackageReference Include="AIRouter.AspNetCore" Version="0.1.0" />
+<PackageReference Include="AIRouter.AspNetCore" Version="0.0.1" />
 ```
 
 ```csharp
-builder.Services
-    .AddAiRouter()
-    .AddAiRouterAspNetCore();
+builder.Services.AddAiRouter();
 
 var app = builder.Build();
-app.MapAiRouterOpenAiEndpoints();
+app.UseAiRouter();
 ```
 
-This maps:
+By default this maps:
 
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `GET /v1/models`
+
+Use an optional prefix when the routes should live below another path:
+
+```csharp
+app.UseAiRouter("api");
+```
+
+That maps the same endpoints at `/api/v1/...`. Prefixes such as `api`, `/api`, `api/`, and `/api/` are normalized to the same route prefix.
 
 Management endpoints are optional and can use the same bearer key:
 
@@ -61,7 +83,13 @@ See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-h
 
 `AiRouter.Server` is optional. It composes Core, ASP.NET hosting, internal SQLite persistence, and a small Angular admin application into one ready-made gateway. Applications embedding AIRouter should depend on the NuGet packages instead of the server project.
 
-The release container is available from GHCR:
+The release container is published to [GitHub Container Registry](https://github.com/dhhieu113pro/ai-router/pkgs/container/ai-router):
+
+```bash
+docker pull ghcr.io/dhhieu113pro/ai-router:latest
+```
+
+Run the latest image with an admin key:
 
 ```bash
 docker run --rm \

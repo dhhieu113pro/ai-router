@@ -188,6 +188,19 @@ jobs:
               exit 0
             fi
 
+            if [[ "$status" == "429" ]]; then
+              python3 - <<'PY'
+          import json
+          with open('/tmp/opencode-response.json', encoding='utf-8') as handle:
+              body = json.load(handle)
+          error = body.get('error') or {}
+          if error.get('type') != 'rate_limit_error':
+              raise SystemExit(f"Unexpected HTTP 429 response: {body}")
+          print("OpenCode is reachable but currently rate-limited; live smoke is accepted as non-blocking.")
+          PY
+              exit 0
+            fi
+
             echo "OpenCode smoke attempt ${attempt} returned HTTP ${status}:"
             cat /tmp/opencode-response.json || true
             echo

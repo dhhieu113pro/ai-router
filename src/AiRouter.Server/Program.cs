@@ -16,7 +16,6 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IProviderStore, SqliteProviderStore>();
 builder.Services.AddSingleton<IRouteStore, SqliteRouteStore>();
 builder.Services.AddOpenAiCompatibleProvider();
-builder.Services.AddAiRouterAspNetCore();
 
 var app = builder.Build();
 
@@ -40,7 +39,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapAiRouterOpenAiEndpoints(app.Configuration["AIROUTER_API_KEY"]);
+app.UseAiRouter(bearerKey: app.Configuration["AIROUTER_API_KEY"]);
 
 var adminKey = app.Configuration["AIROUTER_ADMIN_KEY"];
 if (!string.IsNullOrWhiteSpace(adminKey))

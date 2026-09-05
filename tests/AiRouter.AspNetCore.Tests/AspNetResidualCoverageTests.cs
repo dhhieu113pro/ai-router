@@ -24,7 +24,7 @@ public sealed class AspNetResidualCoverageTests
         using var cts = new CancellationTokenSource();
 
         var request = app.GetTestClient().GetAsync("/v1/models", cts.Token);
-        await manager.ListModelsStarted;
+        await manager.ListModelsStarted.WaitAsync(TimeSpan.FromSeconds(5));
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
