@@ -42,12 +42,20 @@ if ((await providerManager.ListAsync()).Count == 0)
         SupportsNativeResponses: false));
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapAiRouterOpenAiEndpoints(app.Configuration["AIROUTER_API_KEY"]);
 
 var adminKey = app.Configuration["AIROUTER_ADMIN_KEY"];
 if (!string.IsNullOrWhiteSpace(adminKey))
+{
     app.MapAiRouterManagementEndpoints(adminKey);
+    app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+}
+
+app.MapFallbackToFile("/admin/{*path:nonfile}", "admin/index.html");
 
 app.Run();
 

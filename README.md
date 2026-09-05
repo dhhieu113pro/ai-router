@@ -1,6 +1,6 @@
 # AIRouter
 
-AIRouter is a library-first AI provider router for .NET 10. Use it directly from any .NET application, optionally expose an OpenAI-compatible `/v1` API from your own ASP.NET Core host, or run the ready-made `AiRouter.Server` gateway/container.
+AIRouter is a library-first AI provider router for .NET 10. Use it directly from any .NET application, optionally expose an OpenAI-compatible `/v1` API from your own ASP.NET Core host, or run the ready-made `AiRouter.Server` gateway/container with its bundled Angular admin console.
 
 ## Packages
 
@@ -48,29 +48,63 @@ This maps:
 - `POST /v1/responses`
 - `GET /v1/models`
 
+Management endpoints are optional and can use the same bearer key:
+
+```csharp
+app.MapAiRouterManagementEndpoints(adminKey);
+app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+```
+
 See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-host, and streaming examples.
 
-## Optional standalone server
+## Standalone server and Angular admin
 
-`AiRouter.Server` is optional. It composes Core, ASP.NET hosting, and internal SQLite persistence into a ready-made gateway. Applications embedding AIRouter should depend on the NuGet packages instead of the server project.
+`AiRouter.Server` is optional. It composes Core, ASP.NET hosting, internal SQLite persistence, and a small Angular admin application into one ready-made gateway. Applications embedding AIRouter should depend on the NuGet packages instead of the server project.
 
 The release container is available from GHCR:
 
 ```bash
 docker run --rm \
   -p 8080:8080 \
+  -e AIROUTER_ADMIN_KEY=change-me \
   -v ai-router-data:/data \
   ghcr.io/dhhieu113pro/ai-router:latest
 ```
 
-The server exposes `/health` and the OpenAI-compatible `/v1` routes. By default SQLite is stored at `/data/ai-router.db`.
+Then open `http://localhost:8080/admin/` and unlock it with the value of `AIROUTER_ADMIN_KEY`.
+
+The admin console provides:
+
+- provider add/edit/delete and enable/disable,
+- priority, health, connectivity tests, and model discovery,
+- fallback and round-robin route editing,
+- JSON configuration import/export,
+- responsive system light/dark appearance.
+
+The server also exposes `/health` and the OpenAI-compatible `/v1` routes. By default SQLite is stored at `/data/ai-router.db`.
 
 Optional server keys:
 
 ```text
 AIROUTER_API_KEY    Protects /v1 routes when configured
-AIROUTER_ADMIN_KEY  Enables and protects management routes when configured
+AIROUTER_ADMIN_KEY  Enables and protects management/configuration routes when configured
 ```
+
+Provider and route management remains unavailable when `AIROUTER_ADMIN_KEY` is not configured.
+
+### Configuration migration API
+
+When the admin key is configured, the standalone server maps:
+
+```text
+GET  /config/export?includeSecrets=false
+POST /config/import?mode=merge
+POST /config/import?mode=replace
+```
+
+Configuration documents use `schemaVersion: 1`. Export redacts provider API keys unless `includeSecrets=true` is explicitly requested.
+
+`merge` adds or updates matching provider/route ids and preserves unrelated configuration. `replace` additionally deletes provider/route ids that are absent from the imported file. During provider updates, an imported `apiKey: null` preserves the currently stored key.
 
 ## Releases
 
@@ -81,7 +115,8 @@ The dedicated release workflow then:
 1. restores, builds, and tests the solution,
 2. packs and smoke-tests `AIRouter.Core` and `AIRouter.AspNetCore`,
 3. publishes both packages to NuGet.org through trusted publishing,
-4. publishes `linux/amd64` and `linux/arm64` server images to GHCR as `0.1.0`, `0.1`, and `latest`.
+4. runs the Angular tests/production build as part of the server container build,
+5. publishes `linux/amd64` and `linux/arm64` server images to GHCR as `0.1.0`, `0.1`, and `latest`.
 
 NuGet.org trusted publishers for both package IDs must target repository `dhhieu113pro/ai-router`, workflow `.github/workflows/release.yml`, and GitHub environment `production`. No long-lived NuGet API-key repository secret is required.
 
