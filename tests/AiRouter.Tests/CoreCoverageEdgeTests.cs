@@ -98,10 +98,17 @@ public sealed class CoreCoverageEdgeTests
     [Fact]
     public async Task Expired_cooldown_is_cleared_before_request()
     {
-        var fixture = await RouterFixture.CreateAsync();
-        fixture.Provider.Health.Status = ProviderStatus.CoolingDown;
-        fixture.Provider.Health.CooldownUntil = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var fixture = await RouterFixture.CreateAsync(new AiRouterOptions
+        {
+            ConsecutiveFailuresBeforeCooldown = 1,
+            ErrorCooldown = TimeSpan.Zero
+        });
+        fixture.Provider.ChatHandler = _ => Task.FromResult(
+            ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down"));
+        await fixture.Router.ChatAsync("primary/model", Body);
+        Assert.Equal(ProviderStatus.CoolingDown, fixture.Provider.Health.Status);
 
+        fixture.Provider.ChatHandler = _ => Task.FromResult(Success());
         var result = await fixture.Router.ChatAsync("primary/model", Body);
 
         Assert.True(result.Success);
