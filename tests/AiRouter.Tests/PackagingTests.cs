@@ -51,6 +51,28 @@ public sealed class PackagingTests
         Assert.DoesNotContain("PackageReference Include=\"AiRouter.Providers.OpenAI\"", readme, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Library_usage_documents_only_the_two_public_package_choices()
+    {
+        var usage = File.ReadAllText(RepoPath("docs/library-usage.md"));
+
+        Assert.Contains("PackageReference Include=\"AIRouter.Core\"", usage, StringComparison.Ordinal);
+        Assert.Contains("PackageReference Include=\"AIRouter.AspNetCore\"", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("PackageReference Include=\"AiRouter.Providers.OpenAI\"", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("PackageReference Include=\"AiRouter.Persistence.Sqlite\"", usage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Ci_packs_both_public_packages_and_smoke_tests_the_artifacts()
+    {
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/ci.yml"));
+
+        Assert.Contains("dotnet pack src/AiRouter/AiRouter.csproj", workflow, StringComparison.Ordinal);
+        Assert.Contains("dotnet pack src/AiRouter.AspNetCore/AiRouter.AspNetCore.csproj", workflow, StringComparison.Ordinal);
+        Assert.Contains("test-packages", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("artifacts/packages", workflow, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
