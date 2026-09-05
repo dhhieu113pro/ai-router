@@ -8,6 +8,18 @@ namespace AiRouter.Tests;
 public sealed class EmbeddedUsageTests
 {
     [Fact]
+    public void Core_registration_includes_builtin_provider_factory()
+    {
+        var services = new ServiceCollection();
+        services.AddAiRouter();
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.NotNull(provider.GetRequiredService<IAiRouter>());
+        Assert.NotNull(provider.GetRequiredService<IAiProviderFactory>());
+    }
+
+    [Fact]
     public async Task Core_can_be_used_directly_without_web_application_or_sqlite()
     {
         var services = new ServiceCollection();
