@@ -21,12 +21,13 @@ public sealed class AspNetResidualCoverageTests
         await using var app = await StartAsync(
             new StaticRouter(() => Success()),
             manager);
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var cts = new CancellationTokenSource();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            app.GetTestClient().GetAsync("/v1/models", cts.Token));
+        var request = app.GetTestClient().GetAsync("/v1/models", cts.Token);
+        await manager.ListModelsStarted;
+        cts.Cancel();
 
-        Assert.True(manager.ListModelsStarted);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
     }
 
     [Fact]
@@ -136,15 +137,16 @@ public sealed class AspNetResidualCoverageTests
             null,
             Models: [],
             DiscoverModels: true);
+        private readonly TaskCompletionSource _listModelsStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public bool ListModelsStarted { get; private set; }
+        public Task ListModelsStarted => _listModelsStarted.Task;
 
         public override Task<IReadOnlyList<ProviderDefinition>> ListAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ProviderDefinition>>([_provider]);
 
         public override async Task<IReadOnlyList<string>> ListModelsAsync(string id, CancellationToken ct = default)
         {
-            ListModelsStarted = true;
+            _listModelsStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return [];
         }
