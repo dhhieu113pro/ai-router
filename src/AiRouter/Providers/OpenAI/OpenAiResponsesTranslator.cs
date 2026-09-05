@@ -5,6 +5,8 @@ using AiRouter.Models;
 
 namespace AiRouter.Providers.OpenAI;
 
+public sealed class ResponsesTranslationException(string message) : Exception(message);
+
 public sealed class OpenAiResponsesTranslator
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -13,16 +15,20 @@ public sealed class OpenAiResponsesTranslator
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (request.AdditionalProperties.Count > 0)
+        {
+            var unsupported = request.AdditionalProperties.Keys.Order(StringComparer.Ordinal).First();
+            throw new ResponsesTranslationException($"Responses feature '{unsupported}' is not supported by the chat-completions compatibility mode.");
+        }
+
         var result = new ChatCompletionRequest
         {
             Model = request.Model,
             Stream = request.Stream,
             Temperature = request.Temperature,
+            TopP = request.TopP,
             MaxTokens = request.MaxOutputTokens,
-            AdditionalProperties = request.AdditionalProperties.ToDictionary(
-                static pair => pair.Key,
-                static pair => pair.Value,
-                StringComparer.Ordinal)
+            ToolChoice = request.ToolChoice?.Clone()
         };
 
         if (!string.IsNullOrWhiteSpace(request.Instructions))
@@ -212,94 +218,78 @@ public sealed class OpenAiResponsesTranslator
 
     private static async Task PumpSseAsync(Stream source, PipeWriter writer, CancellationToken ct)
     {
-        Exception? error = null;
+        Exception? failure = null;
         try
         {
-            using var reader = new StreamReader(source, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: false);
-            while (!reader.EndOfStream)
+            using var reader = new StreamReader(source, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
                 var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-                if (line is null) break;
+                if (line is null)
+                    break;
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
-                {
-                    await WriteLineAsync(writer, line, ct).ConfigureAwait(false);
                     continue;
-                }
 
-                var payload = line[5..].Trim();
+                var payload = line[5..].TrimStart();
                 if (payload.Length == 0)
-                {
-                    await WriteLineAsync(writer, line, ct).ConfigureAwait(false);
                     continue;
-                }
 
                 if (string.Equals(payload, "[DONE]", StringComparison.Ordinal))
                 {
-                    await WriteLineAsync(writer, "data: [DONE]", ct).ConfigureAwait(false);
+                    await WriteEventAsync(writer, new
+                    {
+                        type = "response.completed",
+                        response = new { status = "completed" }
+                    }, ct).ConfigureAwait(false);
+                    break;
+                }
+
+                using var chunk = JsonDocument.Parse(payload);
+                var delta = ExtractDelta(chunk.RootElement);
+                if (delta is null)
                     continue;
-                }
 
-                string translated;
-                try
+                await WriteEventAsync(writer, new
                 {
-                    translated = TranslateSsePayload(payload);
-                }
-                catch (JsonException)
-                {
-                    translated = payload;
-                }
-
-                await WriteLineAsync(writer, $"data: {translated}", ct).ConfigureAwait(false);
+                    type = "response.output_text.delta",
+                    delta
+                }, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
-            error = ex;
+            failure = ex;
         }
         finally
         {
-            await writer.CompleteAsync(error).ConfigureAwait(false);
+            await source.DisposeAsync().ConfigureAwait(false);
+            await writer.CompleteAsync(failure).ConfigureAwait(false);
         }
     }
 
-    private static string TranslateSsePayload(string payload)
+    private static string? ExtractDelta(JsonElement chunk)
     {
-        using var document = JsonDocument.Parse(payload);
-        var root = document.RootElement;
-        var id = root.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String
-            ? idElement.GetString()
-            : $"resp_{Guid.NewGuid():N}";
-        var model = root.TryGetProperty("model", out var modelElement) && modelElement.ValueKind == JsonValueKind.String
-            ? modelElement.GetString()
-            : null;
-        var delta = string.Empty;
-        if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
+        if (!chunk.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var choice in choices.EnumerateArray())
         {
-            foreach (var choice in choices.EnumerateArray())
-            {
-                if (choice.TryGetProperty("delta", out var deltaObject) &&
-                    deltaObject.ValueKind == JsonValueKind.Object &&
-                    deltaObject.TryGetProperty("content", out var content) &&
-                    content.ValueKind == JsonValueKind.String)
-                {
-                    delta += content.GetString();
-                }
-            }
+            if (!choice.TryGetProperty("delta", out var deltaObject) || deltaObject.ValueKind != JsonValueKind.Object)
+                continue;
+            if (!deltaObject.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.String)
+                continue;
+
+            return content.GetString();
         }
 
-        return JsonSerializer.Serialize(new
-        {
-            type = "response.output_text.delta",
-            response_id = id,
-            model,
-            delta
-        }, Json);
+        return null;
     }
 
-    private static async Task WriteLineAsync(PipeWriter writer, string line, CancellationToken ct)
+    private static async Task WriteEventAsync(PipeWriter writer, object payload, CancellationToken ct)
     {
-        var bytes = Encoding.UTF8.GetBytes(line + "\n");
+        var json = JsonSerializer.Serialize(payload, Json);
+        var bytes = Encoding.UTF8.GetBytes($"event: {JsonSerializer.SerializeToElement(payload, Json).GetProperty("type").GetString()}\ndata: {json}\n\n");
         await writer.WriteAsync(bytes, ct).ConfigureAwait(false);
     }
 }
