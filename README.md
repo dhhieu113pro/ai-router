@@ -2,6 +2,7 @@
 
 [![NuGet AIRouter.Core](https://img.shields.io/nuget/v/AIRouter.Core.svg?label=AIRouter.Core)](https://www.nuget.org/packages/AIRouter.Core)
 [![NuGet AIRouter.AspNetCore](https://img.shields.io/nuget/v/AIRouter.AspNetCore.svg?label=AIRouter.AspNetCore)](https://www.nuget.org/packages/AIRouter.AspNetCore)
+[![GHCR](https://img.shields.io/badge/GHCR-ai--router-2496ED?logo=github)](https://github.com/dhhieu113pro/ai-router/pkgs/container/ai-router)
 
 AIRouter is a library-first AI provider router for .NET 10. Use it directly from any .NET application, optionally expose an OpenAI-compatible `/v1` API from your own ASP.NET Core host, or run the ready-made `AiRouter.Server` gateway/container.
 
@@ -69,7 +70,13 @@ See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-h
 
 `AiRouter.Server` is optional. It composes Core, ASP.NET hosting, and internal SQLite persistence into a ready-made gateway. Applications embedding AIRouter should depend on the NuGet packages instead of the server project.
 
-The release container is available from GHCR:
+The release container is published to [GitHub Container Registry](https://github.com/dhhieu113pro/ai-router/pkgs/container/ai-router):
+
+```bash
+docker pull ghcr.io/dhhieu113pro/ai-router:latest
+```
+
+Run the latest image:
 
 ```bash
 docker run --rm \
