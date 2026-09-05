@@ -19,6 +19,21 @@ public sealed class PackagingTests
     }
 
     [Fact]
+    public void Public_packages_embed_the_repository_readme()
+    {
+        var core = File.ReadAllText(RepoPath("src/AiRouter/AiRouter.csproj"));
+        var aspnet = File.ReadAllText(RepoPath("src/AiRouter.AspNetCore/AiRouter.AspNetCore.csproj"));
+
+        foreach (var project in new[] { core, aspnet })
+        {
+            Assert.Contains("<PackageReadmeFile>README.md</PackageReadmeFile>", project, StringComparison.Ordinal);
+            Assert.Contains("Include=\"../../README.md\"", project, StringComparison.Ordinal);
+            Assert.Contains("Pack=\"true\"", project, StringComparison.Ordinal);
+            Assert.Contains("PackagePath=\"/\"", project, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void Only_core_and_aspnetcore_are_public_packable_packages()
     {
         var core = File.ReadAllText(RepoPath("src/AiRouter/AiRouter.csproj"));
