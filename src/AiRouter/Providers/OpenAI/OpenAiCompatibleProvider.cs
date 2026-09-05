@@ -37,18 +37,32 @@ public sealed class OpenAiCompatibleProvider : IAiProvider
                 return Definition.Models ?? [];
 
             var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
-            if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
-                return Definition.Models ?? [];
+            IReadOnlyList<string> models;
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
+                if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                {
+                    models = Definition.Models ?? [];
+                }
+                else
+                {
+                    models = data.EnumerateArray()
+                        .Where(static item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                        .Select(static item => item.GetProperty("id").GetString())
+                        .Where(static id => !string.IsNullOrWhiteSpace(id))
+                        .Select(static id => id!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                }
+            }
+            finally
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
 
-            return data.EnumerateArray()
-                .Where(static item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-                .Select(static item => item.GetProperty("id").GetString())
-                .Where(static id => !string.IsNullOrWhiteSpace(id))
-                .Select(static id => id!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            return models;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
