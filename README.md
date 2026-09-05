@@ -54,7 +54,36 @@ See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-h
 
 `AiRouter.Server` is optional. It composes Core, ASP.NET hosting, and internal SQLite persistence into a ready-made gateway. Applications embedding AIRouter should depend on the NuGet packages instead of the server project.
 
-Release tags also publish the server container to `ghcr.io/dhhieu113pro/ai-router`.
+The release container is available from GHCR:
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -v ai-router-data:/data \
+  ghcr.io/dhhieu113pro/ai-router:latest
+```
+
+The server exposes `/health` and the OpenAI-compatible `/v1` routes. By default SQLite is stored at `/data/ai-router.db`.
+
+Optional server keys:
+
+```text
+AIROUTER_API_KEY    Protects /v1 routes when configured
+AIROUTER_ADMIN_KEY  Enables and protects management routes when configured
+```
+
+## Releases
+
+Push a semantic-version tag such as `v0.1.0` from a commit contained in `main`.
+
+The dedicated release workflow then:
+
+1. restores, builds, and tests the solution,
+2. packs and smoke-tests `AIRouter.Core` and `AIRouter.AspNetCore`,
+3. publishes both packages to NuGet.org through trusted publishing,
+4. publishes `linux/amd64` and `linux/arm64` server images to GHCR as `0.1.0`, `0.1`, and `latest`.
+
+NuGet.org trusted publishers for both package IDs must target repository `dhhieu113pro/ai-router`, workflow `.github/workflows/release.yml`, and GitHub environment `production`. No long-lived NuGet API-key repository secret is required.
 
 ## License
 
