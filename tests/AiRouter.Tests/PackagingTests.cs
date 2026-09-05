@@ -88,6 +88,19 @@ public sealed class PackagingTests
         Assert.Contains("artifacts/packages", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Ci_collects_line_coverage_and_live_tests_default_opencode_provider()
+    {
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/ci.yml"));
+
+        Assert.Contains("XPlat Code Coverage", workflow, StringComparison.Ordinal);
+        Assert.Contains("coverage.cobertura.xml", workflow, StringComparison.Ordinal);
+        Assert.Contains("Line coverage", workflow, StringComparison.Ordinal);
+        Assert.Contains("opencode-free/mimo-v2.5-free", workflow, StringComparison.Ordinal);
+        Assert.Contains("/v1/chat/completions", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("OPENCODE_API_KEY", workflow, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
