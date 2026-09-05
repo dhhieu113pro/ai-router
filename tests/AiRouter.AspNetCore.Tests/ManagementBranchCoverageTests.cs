@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using AiRouter.Providers;
 using AiRouter.Routing;
@@ -52,6 +53,19 @@ public sealed class ManagementBranchCoverageTests
     }
 
     [Fact]
+    public async Task Models_endpoint_handles_null_configured_model_collection()
+    {
+        var definition = new ProviderDefinition(
+            "primary", "Primary", "fake", "https://unused.test", null,
+            Models: null, DefaultModel: null, DiscoverModels: false);
+        await using var app = await StartOpenAiAsync(null, new DefinitionOnlyManager(definition));
+
+        var response = await app.GetTestClient().GetFromJsonAsync<JsonElement>("/v1/models");
+
+        Assert.Empty(response.GetProperty("data").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Enabled_provider_without_runtime_instance_reports_unknown_health()
     {
         var definition = new ProviderDefinition("primary", "Primary", "fake", "https://unused.test", null, Enabled: true);
@@ -63,14 +77,15 @@ public sealed class ManagementBranchCoverageTests
     }
 
     [Fact]
-    public async Task Existing_route_can_be_updated_successfully()
+    public async Task Existing_route_can_be_updated_successfully_and_malformed_update_is_rejected()
     {
         var routes = new InMemoryRouteStore();
         await routes.UpsertAsync(new RouteDefinition("route", RoutingStrategy.Fallback,
             [new RouteTarget("primary", "old")]));
         await using var app = await StartManagementAsync(new EmptyManager(), routes);
+        var client = app.GetTestClient();
 
-        var response = await app.GetTestClient().PutAsJsonAsync("/routes/route", new
+        var response = await client.PutAsJsonAsync("/routes/route", new
         {
             id = "route",
             strategy = 1,
@@ -80,6 +95,12 @@ public sealed class ManagementBranchCoverageTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("new", (await routes.GetAsync("route"))!.Targets.Single().Model);
+
+        using var malformed = new HttpRequestMessage(HttpMethod.Put, "/routes/route")
+        {
+            Content = new StringContent("{", Encoding.UTF8, "application/json")
+        };
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(malformed)).StatusCode);
     }
 
     private static async Task<WebApplication> StartManagementAsync(IProviderManager manager, IRouteStore routes, string? key = null)
@@ -95,12 +116,12 @@ public sealed class ManagementBranchCoverageTests
         return app;
     }
 
-    private static async Task<WebApplication> StartOpenAiAsync(string key)
+    private static async Task<WebApplication> StartOpenAiAsync(string? key, IProviderManager? manager = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton<IAiRouter>(new Router());
-        builder.Services.AddSingleton<IProviderManager>(new EmptyManager());
+        builder.Services.AddSingleton<IProviderManager>(manager ?? new EmptyManager());
         builder.Services.AddSingleton<IRouteStore>(new InMemoryRouteStore());
         builder.Services.AddAiRouterAspNetCore();
         var app = builder.Build();
