@@ -21,6 +21,6 @@
     "@angular/compiler-cli": "^22.1.0",
     "@types/node": "^24.0.0",
     "typescript": ">=6.0.0 <6.1.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.8"
   }
 }
