@@ -1,5 +1,8 @@
 # AIRouter
 
+[![NuGet AIRouter.Core](https://img.shields.io/nuget/v/AIRouter.Core.svg?label=AIRouter.Core)](https://www.nuget.org/packages/AIRouter.Core)
+[![NuGet AIRouter.AspNetCore](https://img.shields.io/nuget/v/AIRouter.AspNetCore.svg?label=AIRouter.AspNetCore)](https://www.nuget.org/packages/AIRouter.AspNetCore)
+
 AIRouter is a library-first AI provider router for .NET 10. Use it directly from any .NET application, optionally expose an OpenAI-compatible `/v1` API from your own ASP.NET Core host, or run the ready-made `AiRouter.Server` gateway/container.
 
 ## Packages
@@ -8,10 +11,16 @@ There are exactly two public NuGet packages.
 
 ### AIRouter.Core
 
+[View `AIRouter.Core` on NuGet.org](https://www.nuget.org/packages/AIRouter.Core)
+
 Use `AIRouter.Core` in console apps, workers, Windows services, desktop apps, MCP servers, or any other .NET project. Core includes provider management, built-in OpenAI-compatible upstream providers, fallback and round-robin routing, Responses support, streaming, health/cooldown behavior, and in-memory provider/route stores.
 
+```bash
+dotnet add package AIRouter.Core --version 0.0.1
+```
+
 ```xml
-<PackageReference Include="AIRouter.Core" Version="0.1.0" />
+<PackageReference Include="AIRouter.Core" Version="0.0.1" />
 ```
 
 ```csharp
@@ -27,10 +36,16 @@ SQLite is not required. Applications can keep the default in-memory stores or re
 
 ### AIRouter.AspNetCore
 
+[View `AIRouter.AspNetCore` on NuGet.org](https://www.nuget.org/packages/AIRouter.AspNetCore)
+
 Add `AIRouter.AspNetCore` when your application should expose the OpenAI-compatible API. It depends on `AIRouter.Core` and only adds ASP.NET Core hosting integration.
 
+```bash
+dotnet add package AIRouter.AspNetCore --version 0.0.1
+```
+
 ```xml
-<PackageReference Include="AIRouter.AspNetCore" Version="0.1.0" />
+<PackageReference Include="AIRouter.AspNetCore" Version="0.0.1" />
 ```
 
 ```csharp
