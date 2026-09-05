@@ -1,7 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AiRouter/AiRouter.csproj" />
-    <Project Path="src/AiRouter.Providers.OpenAI/AiRouter.Providers.OpenAI.csproj" />
     <Project Path="src/AiRouter.Persistence.Sqlite/AiRouter.Persistence.Sqlite.csproj" />
     <Project Path="src/AiRouter.AspNetCore/AiRouter.AspNetCore.csproj" />
     <Project Path="src/AiRouter.Server/AiRouter.Server.csproj" />

@@ -1,4 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>AIRouter.AspNetCore</PackageId>
+    <Title>AIRouter.AspNetCore</Title>
+    <Description>ASP.NET Core OpenAI-compatible hosting adapter for AIRouter.Core.</Description>
+    <RepositoryUrl>https://github.com/dhhieu113pro/ai-router</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../AiRouter/AiRouter.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
