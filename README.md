@@ -50,19 +50,25 @@ dotnet add package AIRouter.AspNetCore --version 0.0.1
 ```
 
 ```csharp
-builder.Services
-    .AddAiRouter()
-    .AddAiRouterAspNetCore();
+builder.Services.AddAiRouter();
 
 var app = builder.Build();
-app.MapAiRouterOpenAiEndpoints();
+app.UseAiRouter();
 ```
 
-This maps:
+By default this maps:
 
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `GET /v1/models`
+
+Use an optional prefix when the routes should live below another path:
+
+```csharp
+app.UseAiRouter("api");
+```
+
+That maps the same endpoints at `/api/v1/...`. Prefixes such as `api`, `/api`, `api/`, and `/api/` are normalized to the same route prefix.
 
 See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-host, and streaming examples.
 

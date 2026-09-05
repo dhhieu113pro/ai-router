@@ -76,9 +76,9 @@ cat > "$work/aspnet/AspNetSmoke.csproj" <<EOF
 EOF
 cat > "$work/aspnet/Program.cs" <<'EOF'
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddAiRouter().AddAiRouterAspNetCore();
+builder.Services.AddAiRouter();
 var app = builder.Build();
-app.MapAiRouterOpenAiEndpoints();
+app.UseAiRouter("api");
 EOF
 
 dotnet restore "$work/aspnet/AspNetSmoke.csproj" --configfile "$work/NuGet.Config"
