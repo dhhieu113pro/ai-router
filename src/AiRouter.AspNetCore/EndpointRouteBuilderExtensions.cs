@@ -162,8 +162,15 @@ internal static class OpenAiEndpointHandlers
         if (result.Stream is not null)
         {
             context.Response.ContentType = result.ContentType ?? "text/event-stream";
-            await using var stream = result.Stream;
-            await stream.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
+            var stream = result.Stream;
+            try
+            {
+                await stream.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
+            }
+            finally
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
             return;
         }
 
