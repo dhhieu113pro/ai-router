@@ -1,6 +1,17 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
+import { map } from 'rxjs';
 import { ConfigurationDocument, ImportResult, ProviderDefinition, ProviderHealth, RouteDefinition } from './models';
+
+type RawProviderHealth = Omit<ProviderHealth, 'status'> & { status: string | number };
+const providerStatusNames = ['Healthy', 'Degraded', 'CoolingDown', 'Disabled'] as const;
+
+function normalizeProviderStatus(status: string | number): string {
+  if (typeof status === 'number') {
+    return providerStatusNames[status] ?? 'Unknown';
+  }
+  return status || 'Unknown';
+}
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -35,7 +46,9 @@ export class ApiService {
   }
 
   providerHealth(id: string) {
-    return this.http.get<ProviderHealth>(`/providers/${encodeURIComponent(id)}/health`);
+    return this.http.get<RawProviderHealth>(`/providers/${encodeURIComponent(id)}/health`).pipe(
+      map(health => ({ ...health, status: normalizeProviderStatus(health.status) }))
+    );
   }
 
   listRoutes() {
