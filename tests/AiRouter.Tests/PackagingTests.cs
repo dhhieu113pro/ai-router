@@ -111,6 +111,15 @@ public sealed class PackagingTests
         Assert.Contains("key = (package_name, normalized_filename, number)", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Ci_enforces_100_percent_line_coverage()
+    {
+        var workflow = File.ReadAllText(RepoPath(".github/workflows/ci.yml"));
+
+        Assert.Contains("if covered != total:", workflow, StringComparison.Ordinal);
+        Assert.Contains("Coverage gate failed", workflow, StringComparison.Ordinal);
+    }
+
     private static string RepoPath(string relative)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
