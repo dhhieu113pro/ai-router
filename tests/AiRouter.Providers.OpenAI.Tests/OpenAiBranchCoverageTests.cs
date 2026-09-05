@@ -29,35 +29,46 @@ public sealed class OpenAiBranchCoverageTests
     }
 
     [Fact]
-    public async Task Empty_success_body_and_base_url_without_trailing_slash_are_supported()
+    public async Task Empty_and_non_empty_success_bodies_are_supported()
     {
         Uri? requested = null;
-        var provider = Create(new Handler((request, _) =>
+        var empty = Create(new Handler((request, _) =>
         {
             requested = request.RequestUri;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(string.Empty) });
         }), baseUrl: "https://upstream.test/v1");
 
-        var response = await provider.SendChatAsync("model", Request, false);
-
-        Assert.True(response.Success);
-        Assert.Null(response.Body);
+        var emptyResponse = await empty.SendChatAsync("model", Request, false);
+        Assert.True(emptyResponse.Success);
+        Assert.Null(emptyResponse.Body);
         Assert.Equal("https://upstream.test/v1/chat/completions", requested!.AbsoluteUri);
+
+        var populated = Create(new Handler((_, _) => Task.FromResult(Json(HttpStatusCode.OK, "{\"ok\":true}"))));
+        var populatedResponse = await populated.SendChatAsync("model", Request, false);
+        Assert.True(populatedResponse.Success);
+        Assert.True(populatedResponse.Body!.Value.GetProperty("ok").GetBoolean());
     }
 
     [Fact]
-    public async Task Empty_upstream_error_without_reason_uses_default_message()
+    public async Task Empty_and_non_empty_upstream_errors_are_extracted()
     {
-        var provider = Create(new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)599)
+        var empty = Create(new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)599)
         {
             ReasonPhrase = null,
             Content = new StringContent(string.Empty)
         })));
 
-        var response = await provider.SendChatAsync("model", Request, false);
+        var emptyResponse = await empty.SendChatAsync("model", Request, false);
+        Assert.False(emptyResponse.Success);
+        Assert.Equal("Upstream request failed.", emptyResponse.ErrorMessage);
 
-        Assert.False(response.Success);
-        Assert.Equal("Upstream request failed.", response.ErrorMessage);
+        var populated = Create(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("plain failure")
+        })));
+        var populatedResponse = await populated.SendChatAsync("model", Request, false);
+        Assert.False(populatedResponse.Success);
+        Assert.Equal("plain failure", populatedResponse.ErrorMessage);
     }
 
     [Fact]
@@ -80,13 +91,17 @@ public sealed class OpenAiBranchCoverageTests
     }
 
     [Fact]
-    public void Responses_translation_handles_non_string_identity_null_tools_and_out_of_range_usage()
+    public void Responses_translation_handles_non_string_identity_null_or_undefined_tools_and_out_of_range_usage()
     {
         var translator = new OpenAiResponsesTranslator();
         var input = JsonDocument.Parse("\"hello\"").RootElement.Clone();
         var nullTools = JsonDocument.Parse("null").RootElement.Clone();
-        var request = new ResponsesRequest { Model = "fallback", Input = input, Tools = nullTools };
-        Assert.Null(translator.ToChatRequest(request).Tools);
+        var nullRequest = new ResponsesRequest { Model = "fallback", Input = input, Tools = nullTools };
+        Assert.Null(translator.ToChatRequest(nullRequest).Tools);
+
+        var undefinedTools = default(JsonElement);
+        var undefinedRequest = new ResponsesRequest { Model = "fallback", Input = input, Tools = undefinedTools };
+        Assert.Null(translator.ToChatRequest(undefinedRequest).Tools);
 
         var chat = JsonDocument.Parse("""
         {
