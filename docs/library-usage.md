@@ -1,111 +1,77 @@
-# Using AiRouter in Another .NET Project
+# Using AIRouter in Another .NET Project
 
-AiRouter is designed to work as a library first. `AiRouter.Server` is optional.
+AIRouter is library-first. `AiRouter.Server` is optional; applications can embed the router directly and choose their own host, authentication, telemetry, and persistence.
 
-Use the smallest package set that matches how you want to host the router.
+AIRouter has exactly two public NuGet packages.
 
-> The examples in this document define the public API target for the current v1 extraction PR. Where an extension method is not yet implemented on the branch, the implementation should converge on this documented surface rather than coupling consumers to `AiRouter.Server`.
+## Package selection
 
-## Package Selection
+### `AIRouter.Core` — any .NET 10 application
 
-### Core routing only
-
-Use this when your application already owns hosting, configuration, persistence, and authentication.
+Install only Core when you want provider management and routing inside a console app, worker, Windows service, desktop app, MCP server, or another .NET application.
 
 ```xml
-<PackageReference Include="AiRouter" Version="1.0.0" />
+<PackageReference Include="AIRouter.Core" Version="0.1.0" />
 ```
 
-This gives you:
+Core includes:
 
 - `IAiRouter`
-- provider management abstractions
-- fallback and round-robin routing
-- health/cooldown behavior
-- route definitions
-- in-memory stores
+- provider management through `IProviderManager`
+- built-in OpenAI-compatible upstream providers
+- model discovery
+- fallback and round-robin routes
+- provider health/cooldown behavior
+- Chat Completions and Responses-style routing
+- streaming
+- in-memory provider and route stores by default
+- replaceable `IProviderStore` and `IRouteStore` abstractions
 
-It does **not** start an HTTP server.
+Core does **not** reference ASP.NET Core, SQLite, EF Core, or `AiRouter.Server`.
 
-### OpenAI-compatible upstream providers
+### `AIRouter.AspNetCore` — host OpenAI-compatible `/v1` routes
 
-Add this when you want AiRouter to call OpenAI-compatible providers such as OpenAI, OpenRouter, DeepSeek, or another compatible endpoint.
-
-```xml
-<PackageReference Include="AiRouter" Version="1.0.0" />
-<PackageReference Include="AiRouter.Providers.OpenAI" Version="1.0.0" />
-```
-
-### ASP.NET Core OpenAI-compatible host
-
-Add this when your own ASP.NET Core project should expose `/v1/...` endpoints.
+Install the ASP.NET adapter when your application should expose an OpenAI-compatible API:
 
 ```xml
-<PackageReference Include="AiRouter" Version="1.0.0" />
-<PackageReference Include="AiRouter.Providers.OpenAI" Version="1.0.0" />
-<PackageReference Include="AiRouter.AspNetCore" Version="1.0.0" />
+<PackageReference Include="AIRouter.AspNetCore" Version="0.1.0" />
 ```
 
-### SQLite persistence
+`AIRouter.AspNetCore` depends on the matching `AIRouter.Core` version transitively, so an ASP.NET host does not need a separate Core `PackageReference` unless you prefer to declare it explicitly.
 
-Optional:
+It maps:
 
-```xml
-<PackageReference Include="AiRouter.Persistence.Sqlite" Version="1.0.0" />
+```text
+POST /v1/chat/completions
+POST /v1/responses
+GET  /v1/models
 ```
 
-Do not reference SQLite when your application already has its own provider/route store.
+SQLite is intentionally not a public package. Core uses in-memory stores unless your application supplies its own implementations.
 
-## 1. Use AiRouter Directly From C#
-
-Your application can call `IAiRouter` without ASP.NET Core.
-
-The current low-level contract routes protocol payloads as JSON:
+## 1. Register Core
 
 ```csharp
-using System.Text.Json;
-using AiRouter.Routing;
-
-public sealed class AssistantService(IAiRouter router)
-{
-    public async Task<string?> AskAsync(string prompt, CancellationToken ct)
-    {
-        using var document = JsonDocument.Parse(
-            $$"""
-            {
-              "model": "coding",
-              "messages": [
-                { "role": "user", "content": {{JsonSerializer.Serialize(prompt)}} }
-              ]
-            }
-            """);
-
-        var result = await router.ChatAsync(
-            model: "coding",
-            body: document.RootElement,
-            stream: false,
-            ct: ct);
-
-        if (!result.Success)
-            throw new InvalidOperationException(result.ErrorMessage);
-
-        return result.Body?.ToString();
-    }
-}
+var services = new ServiceCollection();
+services.AddAiRouter();
 ```
 
-No `WebApplication`, controller, SQLite database, or `AiRouter.Server` is required.
+`AddAiRouter()` registers the routing engine, in-memory stores, provider manager, and the built-in OpenAI-compatible provider support.
 
-The returned `RouterResult` also identifies the actual provider/model selected by the router.
+In an application using dependency injection, resolve the public services normally:
 
-## 2. Configure Providers in Your Application
+```csharp
+var providerManager = serviceProvider.GetRequiredService<IProviderManager>();
+var routeStore = serviceProvider.GetRequiredService<IRouteStore>();
+var router = serviceProvider.GetRequiredService<IAiRouter>();
+```
 
-A provider represents one independently routable account/endpoint.
+## 2. Configure an OpenAI-compatible provider
 
 ```csharp
 using AiRouter.Providers;
 
-var provider = new ProviderDefinition(
+await providerManager.AddAsync(new ProviderDefinition(
     Id: "openrouter-primary",
     Name: "OpenRouter Primary",
     Type: "openai-compatible",
@@ -114,32 +80,12 @@ var provider = new ProviderDefinition(
     Enabled: true,
     Priority: 10,
     Models: ["openai/gpt-5", "anthropic/claude-sonnet-4.6"],
-    DefaultModel: "openai/gpt-5");
+    DefaultModel: "openai/gpt-5"), cancellationToken);
 ```
 
-The provider can then be registered through `IProviderManager`.
+Provider changes are available to new requests without restarting the process.
 
-Target DI surface:
-
-```csharp
-builder.Services
-    .AddAiRouter()
-    .AddOpenAiCompatibleProvider();
-```
-
-After resolving `IProviderManager`:
-
-```csharp
-await providerManager.AddAsync(provider, cancellationToken);
-```
-
-Provider changes must become visible to new requests without restarting the application.
-
-## 3. Define Fallback Routes
-
-A logical route lets callers use a stable model name while providers/models can change behind it.
-
-Example intent:
+## 3. Define a fallback route
 
 ```csharp
 var route = new RouteDefinition(
@@ -154,36 +100,64 @@ var route = new RouteDefinition(
 await routeStore.UpsertAsync(route, cancellationToken);
 ```
 
-A request with:
+Callers can now use the stable logical model name `coding`; AIRouter selects the preferred target and falls back on eligible failures.
 
-```json
+Round-robin uses the same route model with `RoutingStrategy.RoundRobin`.
+
+## 4. Call `IAiRouter` directly
+
+No HTTP server is required:
+
+```csharp
+using System.Text.Json;
+using AiRouter.Routing;
+
+using var document = JsonDocument.Parse(
+    $$"""
+    {
+      "model": "coding",
+      "messages": [
+        { "role": "user", "content": {{JsonSerializer.Serialize(prompt)}} }
+      ]
+    }
+    """);
+
+var result = await router.ChatAsync(
+    model: "coding",
+    body: document.RootElement,
+    stream: false,
+    ct: cancellationToken);
+
+if (!result.Success)
+    throw new InvalidOperationException(result.ErrorMessage);
+```
+
+`RouterResult` identifies the actual selected provider/model as well as the body/stream and status information.
+
+## 5. Streaming
+
+```csharp
+var result = await router.ChatAsync(
+    model: "coding",
+    body: requestJson,
+    stream: true,
+    ct: cancellationToken);
+
+if (!result.Success)
+    throw new InvalidOperationException(result.ErrorMessage);
+
+if (result.Stream is not null)
 {
-  "model": "coding"
+    await using var stream = result.Stream;
+    await stream.CopyToAsync(destination, cancellationToken);
 }
 ```
 
-tries the preferred target first and automatically falls back on eligible provider/target failures.
+The consumer owns disposal of the returned stream. AIRouter can fall back before a stream is committed; it never switches provider after upstream streaming has been committed.
 
-## 4. Define a Round-Robin Route
+## 6. Use your own API shape
 
-```csharp
-var route = new RouteDefinition(
-    Id: "balanced",
-    Strategy: RoutingStrategy.RoundRobin,
-    Targets:
-    [
-        new RouteTarget("account-a", "model-x", Priority: 10),
-        new RouteTarget("account-b", "model-x", Priority: 10)
-    ]);
-```
-
-Each request starts with the next eligible target. If that target fails with a routable failure, the router continues through the remaining targets.
-
-## 5. Host Your Own API Shape
-
-You do not need OpenAI-compatible inbound endpoints.
-
-Your ASP.NET Core application can inject `IAiRouter` into any endpoint:
+An ASP.NET application can use Core directly without exposing OpenAI-compatible routes:
 
 ```csharp
 app.MapPost("/api/assistant", async (
@@ -191,15 +165,11 @@ app.MapPost("/api/assistant", async (
     IAiRouter router,
     CancellationToken ct) =>
 {
-    using var document = JsonDocument.Parse(
-        JsonSerializer.Serialize(new
-        {
-            model = request.Model ?? "coding",
-            messages = new[]
-            {
-                new { role = "user", content = request.Prompt }
-            }
-        }));
+    using var document = JsonDocument.Parse(JsonSerializer.Serialize(new
+    {
+        model = request.Model ?? "coding",
+        messages = new[] { new { role = "user", content = request.Prompt } }
+    }));
 
     var result = await router.ChatAsync(
         request.Model ?? "coding",
@@ -213,133 +183,60 @@ app.MapPost("/api/assistant", async (
 });
 ```
 
-Your application owns:
+Your host owns URLs, auth, DTOs, telemetry, and lifecycle; AIRouter owns provider selection/routing.
 
-- URL design
-- authentication/authorization
-- request DTOs
-- response envelope
-- telemetry
-- lifecycle
+## 7. Host OpenAI-compatible `/v1`
 
-AiRouter only performs provider selection and routing.
-
-## 6. Host OpenAI-Compatible `/v1` Endpoints
-
-If you want existing OpenAI clients to use your application by changing only the base URL, add the ASP.NET adapter.
-
-Target setup:
+With `AIRouter.AspNetCore`:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services
     .AddAiRouter()
-    .AddOpenAiCompatibleProvider()
     .AddAiRouterAspNetCore();
 
 var app = builder.Build();
-
 app.MapAiRouterOpenAiEndpoints();
-
 app.Run();
 ```
 
-This maps:
+Existing OpenAI-compatible SDKs can point their base URL at your application.
 
-```text
-POST /v1/chat/completions
-POST /v1/responses
-GET  /v1/models
-```
-
-Existing OpenAI-compatible SDKs can then point their base URL at your application.
-
-Provider/route management endpoints are intentionally mapped separately:
+Management endpoints are opt-in and separate:
 
 ```csharp
-app.MapAiRouterManagementEndpoints();
+app.MapAiRouterManagementEndpoints(adminKey);
 ```
 
-This allows your application to protect them with its own authentication/authorization policy.
+Your application can instead expose its own management UI/API over `IProviderManager` and `IRouteStore`.
 
-## 7. Use Your Own Provider Store
+## 8. Use your own persistence
 
-Persistence is an abstraction, not a requirement.
-
-Implement `IProviderStore` when providers should live in your application's existing database/configuration system:
-
-```csharp
-public sealed class MyProviderStore : IProviderStore
-{
-    // Implement list/get/upsert/delete using your own persistence.
-}
-```
-
-Register it instead of the default store:
+Core defaults to in-memory providers/routes. To persist them in your existing database/configuration system, implement and register the abstractions before `AddAiRouter()`:
 
 ```csharp
 builder.Services.AddSingleton<IProviderStore, MyProviderStore>();
+builder.Services.AddSingleton<IRouteStore, MyRouteStore>();
+builder.Services.AddAiRouter();
 ```
 
-Do the same for `IRouteStore` when route definitions belong in your existing persistence layer.
+Core uses replaceable registrations, so application-owned stores stay in control.
 
-## 8. Implement Your Own Upstream Provider
+## 9. Implement another upstream protocol
 
-Implement `IAiProvider` when the upstream is not OpenAI-compatible.
+Implement `IAiProvider` and `IAiProviderFactory` when an upstream is not OpenAI-compatible. Provider adapters translate the routed JSON payload, provide streaming/non-streaming responses and model/health behavior, and classify failures so Core knows when fallback is allowed.
 
-The provider adapter is responsible for:
+## 10. `AiRouter.Server` is optional
 
-- converting the routed request into the upstream protocol
-- returning streaming or non-streaming data
-- listing models when supported
-- health checks
-- classifying failures so the router knows whether fallback is allowed
+Use `AiRouter.Server` when you want the ready-made gateway/container. It composes the two public libraries with internal SQLite persistence.
 
-The router remains unaware of provider-specific HTTP/protocol details.
-
-## 9. Streaming
-
-For streaming calls:
-
-```csharp
-var result = await router.ChatAsync(
-    model: "coding",
-    body: requestJson,
-    stream: true,
-    ct: cancellationToken);
-
-if (result.Stream is not null)
-{
-    await using var stream = result.Stream;
-    await stream.CopyToAsync(destination, cancellationToken);
-}
-```
-
-The consumer must dispose the returned stream.
-
-After an upstream stream is committed, AiRouter does not switch to another provider mid-stream. Fallback occurs only before stream commitment.
-
-Always propagate the caller's `CancellationToken`.
-
-## 10. `AiRouter.Server` Is Optional
-
-Use `AiRouter.Server` when you want the ready-made gateway/container.
-
-Do **not** depend on `AiRouter.Server` from another application merely to access routing.
-
-The intended dependency direction is:
+Do not depend on the server project merely to access routing.
 
 ```text
-Your App ───────────────> AiRouter
-Your ASP.NET Host ──────> AiRouter.AspNetCore ──> AiRouter
-OpenAI Provider ────────> AiRouter.Providers.OpenAI ──> AiRouter
-SQLite Persistence ─────> AiRouter.Persistence.Sqlite ──> AiRouter
-AiRouter.Server ─────────> all optional adapters above
+Any .NET App ───────────────> AIRouter.Core
+ASP.NET Core Host ──────────> AIRouter.AspNetCore ──> AIRouter.Core
+AiRouter.Server ────────────> AIRouter.AspNetCore + AIRouter.Core + internal SQLite
 ```
 
-## Future Inbound Protocols
-
-An Ollama-style API, gRPC host, MCP integration, or another protocol should be implemented as another adapter over `AiRouter`.
-
-It should not require changes to the core routing engine unless the protocol reveals a genuinely new routing capability.
+Future Ollama-style, gRPC, MCP, or custom inbound protocols should be separate host adapters over Core rather than changes to the routing engine.
