@@ -38,6 +38,7 @@ public sealed class BranchCoverageTests
         await manager.SetEnabledAsync("primary", false);
         Assert.Empty(manager.Snapshot);
         Assert.Equal(["model"], await manager.ListModelsAsync("primary"));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => manager.ListModelsAsync("missing"));
     }
 
     [Fact]
@@ -54,8 +55,10 @@ public sealed class BranchCoverageTests
         Assert.Equal("default", all.Targets.Single().Model);
     }
 
-    [Fact]
-    public async Task Rate_limit_with_expired_retry_after_uses_configured_cooldown()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rate_limit_without_future_retry_after_uses_configured_cooldown(bool expiredRetryAfter)
     {
         var fixture = await CreateRouterAsync(new AiRouterOptions { RateLimitCooldown = TimeSpan.FromMinutes(3) });
         fixture.Provider.Response = new ProviderResponse
@@ -63,7 +66,7 @@ public sealed class BranchCoverageTests
             Success = false,
             StatusCode = 429,
             FailureKind = ProviderFailureKind.RateLimited,
-            RetryAfter = DateTimeOffset.UtcNow.AddMinutes(-1)
+            RetryAfter = expiredRetryAfter ? DateTimeOffset.UtcNow.AddMinutes(-1) : null
         };
         var before = DateTimeOffset.UtcNow.AddMinutes(2);
 
