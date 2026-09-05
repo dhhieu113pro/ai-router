@@ -36,7 +36,7 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory artifacts/coverage
 
-      - name: Report line coverage
+      - name: Report and enforce line coverage
         shell: bash
         run: |
           python3 - <<'PY'
@@ -70,9 +70,18 @@ jobs:
           summary = f"Line coverage: {percentage:.2f}% ({covered}/{total})"
           print(summary)
           Path("artifacts/coverage/summary.txt").write_text(summary + "\n", encoding="utf-8")
+
+          if covered != total:
+              uncovered = sorted(key for key, hits in lines.items() if hits == 0)
+              for package_name, filename, number in uncovered:
+                  print(f"UNCOVERED {package_name}/{filename}:{number}")
+              raise SystemExit(
+                  f"Coverage gate failed: expected 100.00% line coverage, got {percentage:.2f}% ({covered}/{total})."
+              )
           PY
 
       - name: Upload coverage
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ github.run_number }}
