@@ -36,19 +36,26 @@ public sealed class OpenAiCompatibleProvider : IAiProvider
             if (!response.IsSuccessStatusCode)
                 return Definition.Models ?? [];
 
-            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
-            if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
-                return Definition.Models ?? [];
+            var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
+                if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                    return Definition.Models ?? [];
 
-            return data.EnumerateArray()
-                .Where(static item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
-                .Select(static item => item.GetProperty("id").GetString())
-                .Where(static id => !string.IsNullOrWhiteSpace(id))
-                .Select(static id => id!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+                return data.EnumerateArray()
+                    .Where(static item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                    .Select(static item => item.GetProperty("id").GetString())
+                    .Where(static id => !string.IsNullOrWhiteSpace(id))
+                    .Select(static id => id!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static id => id, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            finally
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
