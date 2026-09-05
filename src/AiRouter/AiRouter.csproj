@@ -5,6 +5,7 @@
     <Description>Host-agnostic AI provider routing for .NET with provider management, fallback, round-robin, Responses and streaming.</Description>
     <RepositoryUrl>https://github.com/dhhieu113pro/ai-router</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
   <ItemGroup>
@@ -12,5 +13,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
