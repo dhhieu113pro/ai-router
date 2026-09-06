@@ -1,4 +1,4 @@
-FROM node:24-alpine AS admin-build
+FROM --platform=$BUILDPLATFORM node:24-alpine AS admin-build
 WORKDIR /src/src/AiRouter.Admin
 
 COPY src/AiRouter.Admin/package.json ./
