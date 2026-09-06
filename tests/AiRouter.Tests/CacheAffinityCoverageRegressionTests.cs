@@ -25,6 +25,20 @@ public sealed class CacheAffinityCoverageRegressionTests
     }
 
     [Fact]
+    public async Task Routed_usage_records_estimated_cost_and_source()
+    {
+        var telemetry = new InMemoryRouterTelemetry();
+        var fixture = await CreateAsync(telemetry);
+
+        var result = await fixture.Router.ChatAsync("first/model", Body);
+        var record = Assert.Single(telemetry.Recent());
+
+        Assert.True(result.Success);
+        Assert.NotNull(record.Cost);
+        Assert.Equal("estimated", record.CostSource);
+    }
+
+    [Fact]
     public async Task Telemetry_failure_never_changes_successful_routing_result()
     {
         var fixture = await CreateAsync(new ThrowingTelemetry());
@@ -72,8 +86,8 @@ public sealed class CacheAffinityCoverageRegressionTests
         var factory = new FakeFactory();
         var manager = new ProviderManager(new InMemoryProviderStore(), [factory]);
         await manager.InitializeAsync();
-        await manager.AddAsync(new ProviderDefinition("first", "first", "fake", "https://example.test", "key", Priority: 0, Models: ["model"], DefaultModel: "model"));
-        await manager.AddAsync(new ProviderDefinition("second", "second", "fake", "https://example.test", "key", Priority: 10, Models: ["model"], DefaultModel: "model"));
+        await manager.AddAsync(Priced("first", 0));
+        await manager.AddAsync(Priced("second", 10));
         var routes = new InMemoryRouteStore();
         await routes.UpsertAsync(new RouteDefinition("route", RoutingStrategy.Sticky,
         [
@@ -84,6 +98,15 @@ public sealed class CacheAffinityCoverageRegressionTests
         var router = new AiRouterService(new RouteResolver(manager, routes), manager, new AiRouterOptions(), affinity, telemetry);
         return new Fixture(router, affinity);
     }
+
+    private static ProviderDefinition Priced(string id, int priority) => new(
+        id, id, "fake", "https://example.test", "key",
+        Priority: priority,
+        Models: ["model"],
+        DefaultModel: "model",
+        InputPricePerMillion: 1m,
+        CachedInputPricePerMillion: 0.1m,
+        OutputPricePerMillion: 2m);
 
     private sealed record Fixture(AiRouterService Router, InMemoryAffinityStore Affinity);
 
@@ -109,7 +132,7 @@ public sealed class CacheAffinityCoverageRegressionTests
             {
                 Success = true,
                 StatusCode = 200,
-                Body = JsonDocument.Parse("{\"ok\":true}").RootElement.Clone()
+                Body = JsonDocument.Parse("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12,\"prompt_tokens_details\":{\"cached_tokens\":5}}}").RootElement.Clone()
             });
         public Task<ProviderResponse> SendResponsesAsync(string model, JsonElement requestBody, bool stream, CancellationToken ct = default) => SendChatAsync(model, requestBody, stream, ct);
         public Task<ProviderConnectivityResult> CheckHealthAsync(CancellationToken ct = default) => Task.FromResult(new ProviderConnectivityResult(true));
