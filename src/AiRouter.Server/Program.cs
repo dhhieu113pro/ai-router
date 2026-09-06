@@ -48,6 +48,7 @@ if (!string.IsNullOrWhiteSpace(adminKey))
     app.MapAiRouterConfigurationManagementEndpoints(adminKey);
 }
 
+app.MapGet("/admin", () => Results.Redirect("/admin/"));
 app.MapFallbackToFile("/admin/{*path:nonfile}", "admin/index.html");
 
 app.Run();
