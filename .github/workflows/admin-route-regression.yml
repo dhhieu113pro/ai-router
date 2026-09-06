@@ -26,7 +26,7 @@ jobs:
       - name: Build container
         run: docker build --tag ai-router:admin-route-test .
 
-      - name: Verify /admin redirects to /admin/
+      - name: Verify Admin routes
         shell: bash
         run: |
           set -euo pipefail
@@ -41,9 +41,18 @@ jobs:
             sleep 1
           done
 
-          headers="$(mktemp)"
-          status="$(curl --silent --output /dev/null --dump-header "$headers" --write-out '%{http_code}' http://127.0.0.1:18080/admin)"
-          echo "HTTP status: $status"
-          cat "$headers"
-          test "$status" = "302"
-          tr -d '\r' < "$headers" | grep -qi '^location: /admin/$'
+          redirect_headers="$(mktemp)"
+          redirect_status="$(curl --silent --output /dev/null --dump-header "$redirect_headers" --write-out '%{http_code}' http://127.0.0.1:18080/admin)"
+          echo "/admin HTTP status: $redirect_status"
+          cat "$redirect_headers"
+          test "$redirect_status" = "302"
+          tr -d '\r' < "$redirect_headers" | grep -qi '^location: /admin/$'
+
+          admin_headers="$(mktemp)"
+          admin_body="$(mktemp)"
+          admin_status="$(curl --silent --output "$admin_body" --dump-header "$admin_headers" --write-out '%{http_code}' http://127.0.0.1:18080/admin/)"
+          echo "/admin/ HTTP status: $admin_status"
+          cat "$admin_headers"
+          cat "$admin_body"
+          test "$admin_status" = "200"
+          grep -q '<title>AI Router Admin</title>' "$admin_body"
