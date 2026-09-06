@@ -28,10 +28,15 @@ public sealed class StickyRoutingTests
     public async Task Sticky_route_rebinds_after_rate_limit()
     {
         var fixture = await CreateAsync(ProviderResponse.Failed(ProviderFailureKind.RateLimited, 429, "slow down"), Success());
-        var result = await fixture.Router.ChatAsync("route", Body, new RouterRequestContext("session-hash", "header"));
+        const string key = "explicit-affinity";
+        fixture.Affinity.Set("route", key, new ResolvedTarget("first", "model"), DateTimeOffset.UtcNow, TimeSpan.FromMinutes(30));
+
+        var result = await fixture.Router.ChatAsync("route", Body, new RouterRequestContext(key, "header"));
+
         Assert.True(result.Success);
         Assert.True(result.FallbackOccurred);
         Assert.True(result.AffinityRebound);
+        Assert.Equal("second", result.ProviderId);
         Assert.Equal(2, result.AttemptCount);
     }
 
@@ -39,7 +44,9 @@ public sealed class StickyRoutingTests
     public async Task Invalid_request_does_not_retry()
     {
         var fixture = await CreateAsync(ProviderResponse.Failed(ProviderFailureKind.InvalidRequest, 400, "bad"), Success());
-        var result = await fixture.Router.ChatAsync("route", Body, new RouterRequestContext("fixed", "header"));
+        const string key = "invalid-affinity";
+        fixture.Affinity.Set("route", key, new ResolvedTarget("first", "model"), DateTimeOffset.UtcNow, TimeSpan.FromMinutes(30));
+        var result = await fixture.Router.ChatAsync("route", Body, new RouterRequestContext(key, "header"));
         Assert.False(result.Success);
         Assert.Equal(400, result.StatusCode);
         Assert.Single(fixture.Calls);
@@ -63,6 +70,7 @@ public sealed class StickyRoutingTests
         var manager = new ProviderManager(new InMemoryProviderStore(), [factory]);
         await manager.InitializeAsync();
         var routeStore = new InMemoryRouteStore();
+        var affinity = new InMemoryAffinityStore();
         await manager.AddAsync(new ProviderDefinition("first", "first", "fake", "https://example.test", "key", Priority: 0, Models: ["model"], DefaultModel: "model"));
         await manager.AddAsync(new ProviderDefinition("second", "second", "fake", "https://example.test", "key", Priority: 10, Models: ["model"], DefaultModel: "model"));
         factory.Get("first").SetResponses(firstResponse, Success());
@@ -72,11 +80,11 @@ public sealed class StickyRoutingTests
             new RouteTarget("first", "model", 0),
             new RouteTarget("second", "model", 10)
         ]));
-        var router = new AiRouterService(new RouteResolver(manager, routeStore), manager, new AiRouterOptions(), new InMemoryAffinityStore());
-        return new Fixture(router, calls);
+        var router = new AiRouterService(new RouteResolver(manager, routeStore), manager, new AiRouterOptions(), affinity);
+        return new Fixture(router, calls, affinity);
     }
 
-    private sealed record Fixture(AiRouterService Router, ConcurrentQueue<string> Calls);
+    private sealed record Fixture(AiRouterService Router, ConcurrentQueue<string> Calls, InMemoryAffinityStore Affinity);
 
     private sealed class FakeFactory(ConcurrentQueue<string> calls) : IAiProviderFactory
     {
