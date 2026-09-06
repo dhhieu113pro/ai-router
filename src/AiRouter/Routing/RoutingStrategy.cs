@@ -3,5 +3,6 @@ namespace AiRouter.Routing;
 public enum RoutingStrategy
 {
     Fallback,
-    RoundRobin
+    RoundRobin,
+    Sticky
 }

@@ -20,6 +20,7 @@ public static class AiRouterServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IProviderStore, InMemoryProviderStore>();
         services.TryAddSingleton<IRouteStore, InMemoryRouteStore>();
+        services.TryAddSingleton<IAffinityStore, InMemoryAffinityStore>();
         services.TryAddSingleton<IProviderManager, ProviderManager>();
         services.TryAddSingleton<RouteResolver>();
         services.TryAddSingleton<IAiRouter, AiRouterService>();
