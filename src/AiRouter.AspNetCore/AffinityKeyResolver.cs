@@ -57,7 +57,7 @@ public static class AffinityKeyResolver
         foreach (var item in items.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("role", out var roleElement) || roleElement.ValueKind != JsonValueKind.String)
-                break;
+                return;
             var role = roleElement.GetString();
             if (role is not ("system" or "developer")) break;
             if (!item.TryGetProperty("content", out var content)) continue;
