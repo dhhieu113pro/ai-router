@@ -91,7 +91,7 @@ public sealed class AiRouterService : IAiRouter
             var start = _roundRobinIndices.AddOrUpdate(route.RouteId, 0, static (_, current) => unchecked(current + 1));
             eligible = Rotate(eligible, (int)((uint)start % (uint)eligible.Length));
         }
-        else if (route.Strategy == RoutingStrategy.Sticky && !route.Pinned)
+        else if (!route.Pinned && route.Strategy == RoutingStrategy.Sticky)
         {
             var key = requestContext?.AffinityKey;
             if (!string.IsNullOrWhiteSpace(key) && _affinity.TryGet(route.RouteId, key, DateTimeOffset.UtcNow, out var stored))
@@ -137,9 +137,9 @@ public sealed class AiRouterService : IAiRouter
             {
                 MarkSuccess(item.Provider, latency);
                 var rebound = false;
-                if (route.Strategy == RoutingStrategy.Sticky && !route.Pinned && requestContext?.AffinityKey is { Length: > 0 } key)
+                if (!route.Pinned && route.Strategy == RoutingStrategy.Sticky && requestContext?.AffinityKey is { Length: > 0 } key)
                 {
-                    rebound = attempts > 1 || (priorAffinity is not null && !SameTarget(item.Target, priorAffinity));
+                    rebound = attempts > 1;
                     _affinity.Set(route.RouteId, key, item.Target, DateTimeOffset.UtcNow, _options.StickyAffinityTtl);
                 }
                 var mapped = Map(response, item.Target, route, affinityApplied, affinitySource, rebound, attempts > 1, attempts, classification);
