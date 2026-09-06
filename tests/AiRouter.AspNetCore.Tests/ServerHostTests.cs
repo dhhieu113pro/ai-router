@@ -20,6 +20,21 @@ public sealed class ServerHostTests
     }
 
     [Fact]
+    public async Task Admin_without_trailing_slash_redirects_to_canonical_path()
+    {
+        await using var factory = Factory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var response = await client.GetAsync("/admin");
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/admin/", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
     public async Task Fresh_server_seeds_opencode_free_provider_without_api_key()
     {
         await using var factory = Factory();

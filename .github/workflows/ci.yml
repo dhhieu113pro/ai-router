@@ -158,6 +158,12 @@ jobs:
           done
 
           curl --fail --silent http://127.0.0.1:18080/health >/dev/null
+
+          redirect_headers="$(mktemp)"
+          redirect_status="$(curl --silent --output /dev/null --dump-header "$redirect_headers" --write-out '%{http_code}' http://127.0.0.1:18080/admin)"
+          test "$redirect_status" = "302"
+          tr -d '\r' < "$redirect_headers" | grep -qi '^location: /admin/$'
+
           admin_html="$(curl --fail --silent http://127.0.0.1:18080/admin/)"
           grep -q '<title>AI Router Admin</title>' <<<"$admin_html"
           echo "AIRouter container health and Admin UI smoke checks passed."
