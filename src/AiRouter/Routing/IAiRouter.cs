@@ -26,7 +26,22 @@ public sealed class RouterResult
 public interface IAiRouter
 {
     Task<RouterResult> ChatAsync(string model, JsonElement body, bool stream = false, CancellationToken ct = default);
-    Task<RouterResult> ChatAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default);
+
+    Task<RouterResult> ChatAsync(
+        string model,
+        JsonElement body,
+        RouterRequestContext? requestContext,
+        bool stream = false,
+        CancellationToken ct = default) =>
+        ChatAsync(model, body, stream, ct);
+
     Task<RouterResult> ResponsesAsync(string model, JsonElement body, bool stream = false, CancellationToken ct = default);
-    Task<RouterResult> ResponsesAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default);
+
+    Task<RouterResult> ResponsesAsync(
+        string model,
+        JsonElement body,
+        RouterRequestContext? requestContext,
+        bool stream = false,
+        CancellationToken ct = default) =>
+        ResponsesAsync(model, body, stream, ct);
 }
