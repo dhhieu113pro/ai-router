@@ -40,6 +40,41 @@ public sealed class AffinityRoutingApiTests
     }
 
     [Fact]
+    public void Stable_prefix_supports_array_content_and_ignores_non_text_parts()
+    {
+        var context = new DefaultHttpContext();
+        var body = JsonDocument.Parse("""
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": [" first ", {"text":"second"}, {"image_url":"ignored"}, 42]
+            },
+            {"role":"developer","content":[{"text":" third "}]},
+            {"role":"user","content":"stop"}
+          ]
+        }
+        """).RootElement.Clone();
+
+        var resolved = AffinityKeyResolver.Resolve(context, "route", body);
+
+        Assert.Equal("prefix", resolved.AffinitySource);
+        Assert.Equal(64, resolved.AffinityKey!.Length);
+    }
+
+    [Fact]
+    public void Invalid_leading_message_shape_falls_back_to_route_identity()
+    {
+        var context = new DefaultHttpContext();
+        var body = JsonDocument.Parse("{\"messages\":[42,{\"content\":\"missing role\"}]}").RootElement.Clone();
+
+        var resolved = AffinityKeyResolver.Resolve(context, "route", body);
+
+        Assert.Equal("route", resolved.AffinitySource);
+        Assert.Null(resolved.AffinityKey);
+    }
+
+    [Fact]
     public void Route_source_is_used_when_no_stable_identity_exists()
     {
         var context = new DefaultHttpContext();
