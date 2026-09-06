@@ -41,7 +41,9 @@ The ASP.NET Core transport derives one opaque affinity key using this precedence
 2. OpenAI-compatible request field `user` when present and a non-empty string.
 3. A deterministic fingerprint derived from the stable request prefix.
 
-The fingerprint fallback must not hash the entire mutable request body. It should use stable request identity inputs available in both Chat Completions and Responses requests: route id plus normalized leading system/developer content where available. If no stable prefix can be derived, the request is treated as unkeyed and Sticky falls back to a deterministic route-level selection rather than generating a random session identity.
+The fingerprint fallback must not hash the entire mutable request body. It uses route id plus normalized leading system/developer content where that content can be identified safely in Chat Completions or Responses input. If no stable prefix can be derived, the request is unkeyed.
+
+For an unkeyed Sticky request, selection hashes only `routeId` to choose a deterministic starting target. Unkeyed requests are not written to the affinity store; they simply resolve to the same healthy route target while the route's eligible target set is unchanged.
 
 Raw session identifiers and raw prompt content must never be stored in telemetry. Affinity storage uses a SHA-256-derived opaque key.
 
@@ -64,29 +66,29 @@ For a resolved Sticky route:
 2. If an affinity entry exists and its exact provider/model target is still present and not cooling down, move it to the front.
 3. If there is no usable affinity entry, select a deterministic starting target by hashing `routeId + affinityKey` modulo eligible target count. For unkeyed requests, hash `routeId` only.
 4. Attempt targets in that order using existing failure classification rules.
-5. On success, write/update affinity to the successful provider/model target.
-6. On `RateLimited` or `ProviderFailure`, continue failover when safe under existing rules. A successful fallback becomes the new affinity target.
+5. On success, write/update affinity to the successful provider/model target only when the request has an affinity key.
+6. On `RateLimited` or `ProviderFailure`, continue failover when safe under existing rules. A successful fallback becomes the new affinity target for keyed requests.
 7. On `InvalidRequest`, cancellation, or committed stream failure, preserve current stop behavior and do not silently retry elsewhere.
 
 This means Sticky prefers cache locality but never disables the gateway's existing resilience behavior.
 
-## Router request context
+## Router request context and compatibility
 `IAiRouter` currently receives only model, JSON body, stream flag, and cancellation token. Affinity metadata is transport-derived, so add a small router request context object rather than passing HTTP primitives into the core library.
 
-Proposed fields:
+Fields:
 - `string? AffinityKey`
-- `string AffinitySource` with values `header`, `user`, `prefix`, or `route`
+- `AffinitySource` enum with values `Header`, `User`, `Prefix`, and `Route`
 - optional correlation/request id for telemetry
 
-The public API should preserve existing call patterns with overloads/defaults so current NuGet consumers continue compiling where practical.
+To preserve source compatibility for NuGet consumers, keep the existing `ChatAsync(string model, JsonElement body, bool stream = false, CancellationToken ct = default)` and `ResponsesAsync(...)` methods. Add new context-aware overloads that accept the routing request context. Existing overloads delegate to the new path with no explicit affinity context. ASP.NET Core uses the context-aware overloads.
 
 ## Router result metadata
 Extend `RouterResult` with routing metadata sufficient for HTTP headers and telemetry:
 - selected provider/model
-- `AffinityApplied`
-- `AffinitySource`
-- `AffinityRebound`
-- `FallbackOccurred`
+- affinity classification
+- affinity source
+- affinity rebound flag
+- fallback occurred flag
 - attempt count
 
 ASP.NET Core emits:
@@ -96,6 +98,8 @@ ASP.NET Core emits:
 - `X-AiRouter-Affinity-Source: header|user|prefix|route`
 - `X-AiRouter-Fallback: true|false`
 - `X-AiRouter-Attempts: <n>`
+
+`hit` means a keyed request reused an existing affinity entry. `miss` means a keyed request had no usable affinity entry and selected a target. `route` means an unkeyed Sticky request used deterministic route-level selection. `pinned` means the request used existing direct provider/model pinning.
 
 No raw affinity key is returned.
 
@@ -114,13 +118,21 @@ Provider adapters may populate normalized usage from provider-specific response 
 
 For streaming responses, Phase 1 records routing/latency/attempt telemetry. Usage is recorded only if the provider adapter can obtain a terminal usage payload without changing externally visible streaming semantics.
 
+Aggregate cache ratio is `sum(cachedInputTokens) / sum(inputTokens)` over only requests where both input-token and cached-input-token values are known. The summary also reports cache-telemetry coverage so a high ratio over a small observable subset is not presented as global certainty.
+
 ## Cost model
 Provider definitions may optionally include pricing metadata for estimation when the upstream does not report cost:
 - input price per million tokens
 - cached-input price per million tokens
 - output price per million tokens
 
-Estimated cost is calculated only when required token counts and configured pricing are available. Telemetry clearly distinguishes `reported` from `estimated` cost.
+When cached input tokens are known, estimated cost is:
+
+`uncachedInput = max(inputTokens - cachedInputTokens, 0)`
+
+`cost = uncachedInput * inputPrice + cachedInputTokens * cachedInputPrice + outputTokens * outputPrice`, with all prices converted from per-million-token units.
+
+An estimate is produced only when all token counts needed for the formula and every applicable configured price are available. If cached tokens are present but cached-input pricing is absent, estimated cost is null rather than silently charging cached tokens at the normal input rate. Provider-reported cost always takes precedence over estimates. Telemetry distinguishes `reported` from `estimated` cost.
 
 Pricing is optional and must not affect routing in Phase 1.
 
@@ -134,28 +146,28 @@ A request telemetry record contains:
 - upstream model
 - routing strategy
 - pinned/sticky/fallback flags
-- affinity hit/miss classification
+- affinity classification
 - attempt count
 - latency
 - normalized usage
 - reported/estimated cost
 - failure kind/status for failed requests
 
-Do not store prompts, tool contents, API keys, raw session ids, or response bodies.
+Do not store prompts, tool contents, API keys, raw session ids, affinity hashes, or response bodies.
 
-The collector maintains aggregate views by route and provider plus a bounded recent-request ring buffer. Default recent retention should be count-based and configurable rather than unbounded.
+The collector maintains aggregate views by route and provider plus a bounded recent-request ring buffer. Default recent retention is count-based and configurable rather than unbounded.
 
 ## Management API
 Extend authenticated management endpoints with:
 
-- `GET /telemetry/summary` — aggregate request count, success/error counts, average latency, tokens, cached tokens, cache ratio, and cost grouped by provider/route.
+- `GET /telemetry/summary` — aggregate request count, success/error counts, average latency, tokens, cached tokens, cache ratio, cache-telemetry coverage, and cost grouped by provider/route.
 - `GET /telemetry/recent` — bounded recent routing records without prompt/body data.
 - `POST /probe/cache` — execute a controlled cache-affinity probe.
 
 Existing bearer-key protection applies.
 
 ## Cache probe
-`POST /probe/cache` accepts a route/model plus a small OpenAI-compatible probe request and repeat count. Default repeat count is 3; enforce a small upper bound to prevent accidental spend.
+`POST /probe/cache` accepts a route/model plus a small OpenAI-compatible probe request and repeat count. Default repeat count is 3; `AiRouterOptions.CacheProbeMaxRepeats` defaults to 5 and is enforced server-side to prevent accidental spend.
 
 The probe sends identical requests through normal routing while forcing one generated probe session id so Sticky behavior is measurable. It returns per-attempt:
 - selected provider/model
@@ -176,7 +188,7 @@ The probe reports observations only; it must not automatically change route conf
 Add a compact Cache & Cost section to the existing admin UI rather than a separate application.
 
 Phase 1 UI shows:
-- overall cache ratio
+- overall observable cache ratio plus cache-telemetry coverage
 - token totals
 - estimated/reported spend
 - average latency
@@ -189,8 +201,8 @@ No charting framework is required for Phase 1. Prefer simple cards/tables consis
 ## Configuration changes
 Add to `AiRouterOptions`:
 - `StickyAffinityTtl` default 30 minutes
-- `TelemetryRecentCapacity` with a conservative bounded default
-- `CacheProbeMaxRepeats` with a small default maximum
+- `TelemetryRecentCapacity` default 1,000 records
+- `CacheProbeMaxRepeats` default 5
 
 Add optional pricing fields to `ProviderDefinition`. Existing serialized provider definitions must remain valid when these fields are absent.
 
@@ -199,7 +211,7 @@ Add optional pricing fields to `ProviderDefinition`. Existing serialized provide
 ## Failure and edge-case behavior
 - If a sticky target is deleted/disabled, the next request ignores that stale affinity and selects another eligible target.
 - If all providers are cooling down, preserve current behavior of retrying the resolved set rather than making the route permanently unavailable.
-- If a target rate-limits, existing cooldown rules apply and a successful fallback becomes sticky.
+- If a target rate-limits, existing cooldown rules apply and a successful fallback becomes sticky for keyed requests.
 - A route edit that removes a target naturally invalidates matching affinity entries on next lookup; eager global invalidation is unnecessary in Phase 1.
 - Probe requests respect cancellation and provider timeouts.
 - Telemetry failures must never fail an otherwise successful model request.
@@ -208,6 +220,7 @@ Add optional pricing fields to `ProviderDefinition`. Existing serialized provide
 ## Security and privacy
 - Management telemetry/probe endpoints use the existing admin bearer-key authorization.
 - Never persist or return raw `X-AiRouter-Session` values.
+- Never store affinity hashes in telemetry; the affinity store contains only its internal opaque lookup keys.
 - Never store request/response bodies in telemetry.
 - Prefix fingerprints are one-way hashes over minimal normalized stable content.
 - Provider API keys remain redacted exactly as today.
@@ -220,11 +233,13 @@ Add optional pricing fields to `ProviderDefinition`. Existing serialized provide
 - Existing `X-AiRouter-Provider` and `X-AiRouter-Model` headers remain.
 - New headers are additive.
 - Direct `provider/model` behavior remains pinned.
+- Existing `IAiRouter` call forms remain available and delegate to the new context-aware implementation.
 
 ## Testing strategy
 ### Core routing tests
 - same sticky affinity repeatedly selects the same target
 - different affinity keys distribute deterministically
+- unkeyed requests use deterministic route-level selection without creating affinity entries
 - expired affinity is recalculated
 - disabled/deleted/cooling target is not reused
 - rate limit/provider failure falls back and rebinds affinity
@@ -235,7 +250,8 @@ Add optional pricing fields to `ProviderDefinition`. Existing serialized provide
 ### ASP.NET Core tests
 - session header precedence over request `user`
 - `user` precedence over prefix fingerprint
-- no raw affinity value appears in response
+- prefix fingerprint falls back to route-level selection when no stable prefix exists
+- no raw affinity value appears in response or telemetry
 - new routing headers are emitted correctly
 - management telemetry endpoints require authorization
 - probe repeat limit and invalid payload handling
@@ -244,7 +260,10 @@ Add optional pricing fields to `ProviderDefinition`. Existing serialized provide
 - normalize OpenAI-style usage
 - normalize cached-token details when present
 - missing usage leaves normalized values null
+- cache ratio excludes requests whose cache-token observability is unknown and reports coverage
 - pricing estimates cached and uncached input correctly
+- missing cached-input price produces null estimate when cached tokens are present
+- provider-reported cost overrides estimated cost
 - telemetry collector remains bounded
 - telemetry failures do not fail router requests
 
@@ -261,6 +280,6 @@ Use fake upstream providers to verify repeated requests through a Sticky route r
 - Repeated requests carrying the same explicit session id through a Sticky route select one healthy provider/model until failover is required.
 - Failover rebinds affinity without breaking current health/cooldown semantics.
 - Users can see which provider handled each request and whether affinity/fallback occurred.
-- When upstream cache-token fields exist, AI Router reports a truthful cache ratio and probe diagnostics.
-- No prompt bodies or raw session ids are retained by telemetry.
-- Existing Fallback, RoundRobin, direct pinning, and OpenAI-compatible endpoints remain backward compatible.
+- When upstream cache-token fields exist, AI Router reports a truthful observable cache ratio plus telemetry coverage and probe diagnostics.
+- No prompt bodies, raw session ids, or affinity hashes are retained by telemetry.
+- Existing Fallback, RoundRobin, direct pinning, `IAiRouter` call forms, and OpenAI-compatible endpoints remain backward compatible.
