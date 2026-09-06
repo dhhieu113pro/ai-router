@@ -16,9 +16,7 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")),
             ("second", Success()));
-
         var result = await fixture.Router.ChatAsync("route", Body);
-
         Assert.True(result.Success);
         Assert.Equal("second", result.ProviderId);
         Assert.Equal(["first", "second"], fixture.Calls.ToArray());
@@ -30,12 +28,33 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.InvalidRequest, 400, "bad")),
             ("second", Success()));
-
         var result = await fixture.Router.ChatAsync("route", Body);
-
         Assert.False(result.Success);
         Assert.Equal(400, result.StatusCode);
         Assert.Equal(["first"], fixture.Calls.ToArray());
+    }
+
+    [Fact]
+    public async Task Cancelled_provider_response_is_terminal_and_does_not_fallback()
+    {
+        var fixture = await CreateAsync(RoutingStrategy.Fallback,
+            ("first", ProviderResponse.Failed(ProviderFailureKind.Cancelled, 499, "cancelled")),
+            ("second", Success()));
+        var result = await fixture.Router.ChatAsync("route", Body);
+        Assert.False(result.Success);
+        Assert.Equal(499, result.StatusCode);
+        Assert.Equal(["first"], fixture.Calls.ToArray());
+    }
+
+    [Fact]
+    public async Task Unknown_route_returns_invalid_request_without_provider_call()
+    {
+        var fixture = await CreateAsync(RoutingStrategy.Fallback, ("first", Success()));
+        fixture.Calls.Clear();
+        var result = await fixture.Router.ChatAsync("missing-route", Body);
+        Assert.False(result.Success);
+        Assert.Equal(400, result.StatusCode);
+        Assert.Empty(fixture.Calls);
     }
 
     [Fact]
@@ -44,23 +63,38 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")),
             ("second", Success()));
-
         var result = await fixture.Router.ChatAsync("first/model", Body);
-
         Assert.False(result.Success);
         Assert.Equal(["first"], fixture.Calls.ToArray());
     }
 
     [Fact]
+    public async Task Sticky_without_context_uses_route_affinity_classification()
+    {
+        var fixture = await CreateAsync(RoutingStrategy.Sticky, ("first", Success()), ("second", Success()));
+        var result = await fixture.Router.ChatAsync("route", Body);
+        Assert.True(result.Success);
+        Assert.Equal("route", result.AffinityClassification);
+    }
+
+    [Fact]
+    public async Task Sticky_with_new_key_reports_miss_then_hit()
+    {
+        var fixture = await CreateAsync(RoutingStrategy.Sticky, ("first", Success()), ("second", Success()));
+        var context = new RouterRequestContext("new-key", "header");
+        var first = await fixture.Router.ChatAsync("route", Body, context);
+        var second = await fixture.Router.ChatAsync("route", Body, context);
+        Assert.Equal("miss", first.AffinityClassification);
+        Assert.Equal("hit", second.AffinityClassification);
+        Assert.Equal(first.ProviderId, second.ProviderId);
+    }
+
+    [Fact]
     public async Task Round_robin_rotates_starting_target()
     {
-        var fixture = await CreateAsync(RoutingStrategy.RoundRobin,
-            ("first", Success()),
-            ("second", Success()));
-
+        var fixture = await CreateAsync(RoutingStrategy.RoundRobin, ("first", Success()), ("second", Success()));
         var one = await fixture.Router.ChatAsync("route", Body);
         var two = await fixture.Router.ChatAsync("route", Body);
-
         Assert.Equal("first", one.ProviderId);
         Assert.Equal("second", two.ProviderId);
     }
@@ -71,9 +105,7 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.RoundRobin,
             ("first", ProviderResponse.Failed(ProviderFailureKind.TargetFailure, 404, "model missing")),
             ("second", Success()));
-
         var result = await fixture.Router.ChatAsync("route", Body);
-
         Assert.True(result.Success);
         Assert.Equal("second", result.ProviderId);
     }
@@ -84,11 +116,9 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")),
             ("second", Success()));
-
         await fixture.Router.ChatAsync("route", Body);
         fixture.Calls.Clear();
         await fixture.Router.ChatAsync("route", Body);
-
         Assert.Equal(["second"], fixture.Calls.ToArray());
     }
 
@@ -98,11 +128,9 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")),
             ("second", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")));
-
         await fixture.Router.ChatAsync("route", Body);
         fixture.Calls.Clear();
         await fixture.Router.ChatAsync("route", Body);
-
         Assert.Equal(2, fixture.Calls.Count);
     }
 
@@ -112,11 +140,9 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback,
             ("first", ProviderResponse.Failed(ProviderFailureKind.ProviderFailure, 503, "down")),
             ("second", Success()));
-
         await fixture.Router.ChatAsync("route", Body);
         fixture.Provider("first").SetResponses(Success());
         await fixture.Router.ChatAsync("first/model", Body);
-
         Assert.Equal(0, fixture.Provider("first").Health.ConsecutiveFailures);
         Assert.Equal(ProviderStatus.Healthy, fixture.Provider("first").Health.Status);
     }
@@ -127,7 +153,6 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.Fallback, ("first", Success()));
         using var cts = new CancellationTokenSource();
         cts.Cancel();
-
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Router.ChatAsync("route", Body, ct: cts.Token));
     }
 
@@ -143,9 +168,7 @@ public sealed class AiRouterServiceTests
             StreamCommitted = true
         };
         var fixture = await CreateAsync(RoutingStrategy.Fallback, ("first", committed), ("second", Success()));
-
         var result = await fixture.Router.ChatAsync("route", Body, stream: true);
-
         Assert.False(result.Success);
         Assert.Equal(["first"], fixture.Calls.ToArray());
     }
@@ -156,7 +179,6 @@ public sealed class AiRouterServiceTests
         var fixture = await CreateAsync(RoutingStrategy.RoundRobin, ("first", Success()), ("second", Success()));
         var tasks = Enumerable.Range(0, 20).Select(_ => fixture.Router.ChatAsync("route", Body));
         var results = await Task.WhenAll(tasks);
-
         Assert.Contains(results, result => result.ProviderId == "first");
         Assert.Contains(results, result => result.ProviderId == "second");
     }
@@ -170,7 +192,6 @@ public sealed class AiRouterServiceTests
         var manager = new ProviderManager(new InMemoryProviderStore(), [factory]);
         await manager.InitializeAsync();
         var routeStore = new InMemoryRouteStore();
-
         var targets = new List<RouteTarget>();
         var priority = 0;
         foreach (var item in providers)
@@ -180,7 +201,6 @@ public sealed class AiRouterServiceTests
             targets.Add(new RouteTarget(item.Id, "model", priority));
             priority += 10;
         }
-
         await routeStore.UpsertAsync(new RouteDefinition("route", strategy, targets));
         var resolver = new RouteResolver(manager, routeStore);
         return new Fixture(new AiRouterService(resolver, manager, new AiRouterOptions()), calls, factory);
@@ -204,7 +224,6 @@ public sealed class AiRouterServiceTests
         private readonly Queue<ProviderResponse> _responses = new();
         public ProviderDefinition Definition { get; } = definition;
         public ProviderHealth Health { get; } = new();
-
         public void SetResponses(params ProviderResponse[] responses)
         {
             lock (_responses)
@@ -213,7 +232,6 @@ public sealed class AiRouterServiceTests
                 foreach (var response in responses) _responses.Enqueue(response);
             }
         }
-
         public Task<ProviderResponse> SendChatAsync(string model, JsonElement requestBody, bool stream, CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
@@ -224,7 +242,6 @@ public sealed class AiRouterServiceTests
                 return Task.FromResult(response);
             }
         }
-
         public Task<ProviderResponse> SendResponsesAsync(string model, JsonElement requestBody, bool stream, CancellationToken ct = default) => SendChatAsync(model, requestBody, stream, ct);
         public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Definition.Models ?? []);
         public Task<ProviderConnectivityResult> CheckHealthAsync(CancellationToken ct = default) => Task.FromResult(new ProviderConnectivityResult(true));

@@ -44,11 +44,7 @@ public static class AiRouterTelemetryManagementEndpointRouteBuilderExtensions
             {
                 request = await context.Request.ReadFromJsonAsync<CacheProbeRequest>(Json, context.RequestAborted).ConfigureAwait(false);
             }
-            catch (JsonException)
-            {
-                request = null;
-            }
-            catch (BadHttpRequestException)
+            catch (Exception ex) when (ex is JsonException or BadHttpRequestException)
             {
                 request = null;
             }

@@ -12,7 +12,10 @@ public static class ProviderUsageParser
 
         int? input = Int(usage, "prompt_tokens") ?? Int(usage, "input_tokens");
         int? output = Int(usage, "completion_tokens") ?? Int(usage, "output_tokens");
-        int? total = Int(usage, "total_tokens") ?? (input is not null && output is not null ? input + output : null);
+        int? total = Int(usage, "total_tokens");
+        if (total is null && input is not null && output is not null)
+            total = input.Value + output.Value;
+
         int? cached = null;
         if (usage.TryGetProperty("prompt_tokens_details", out var promptDetails) && promptDetails.ValueKind == JsonValueKind.Object)
             cached = Int(promptDetails, "cached_tokens");
