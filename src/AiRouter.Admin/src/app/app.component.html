@@ -1,12 +1,10 @@
 <div class="app-shell" *ngIf="!locked; else unlockView">
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark">AR</div>
-      <div><strong>AI Router</strong><span>Admin Console</span></div>
-    </div>
+    <div class="brand"><div class="brand-mark">AR</div><div><strong>AI Router</strong><span>Admin Console</span></div></div>
     <nav>
       <button [class.active]="activeTab === 'providers'" (click)="activeTab = 'providers'"><span>◫</span> Providers</button>
       <button [class.active]="activeTab === 'routes'" (click)="activeTab = 'routes'"><span>⌘</span> Routes</button>
+      <button [class.active]="activeTab === 'cache'" (click)="openCache()"><span>⚡</span> Cache & Cost</button>
       <button [class.active]="activeTab === 'backup'" (click)="activeTab = 'backup'"><span>⇅</span> Import / Export</button>
     </nav>
     <div class="sidebar-footer"><button class="subtle" (click)="toggleTheme()">◐ Theme</button><button class="subtle" (click)="logout()">↪ Lock admin</button></div>
@@ -14,8 +12,8 @@
 
   <main>
     <header class="topbar">
-      <div><p class="eyebrow">Local management</p><h1>{{ activeTab === 'providers' ? 'Providers' : activeTab === 'routes' ? 'Routes' : 'Configuration' }}</h1></div>
-      <div class="top-actions"><span class="live-pill"><i></i> Connected</span><button class="icon-button" title="Refresh" (click)="refreshAll()">↻</button></div>
+      <div><p class="eyebrow">Local management</p><h1>{{ activeTab === 'providers' ? 'Providers' : activeTab === 'routes' ? 'Routes' : activeTab === 'cache' ? 'Cache & Cost' : 'Configuration' }}</h1></div>
+      <div class="top-actions"><span class="live-pill"><i></i> Connected</span><button class="icon-button" title="Refresh" (click)="activeTab === 'cache' ? refreshTelemetry() : refreshAll()">↻</button></div>
     </header>
 
     <section *ngIf="activeTab === 'providers'" class="page">
@@ -23,10 +21,7 @@
       <div class="empty-card" *ngIf="providers.length === 0"><strong>No providers configured</strong><p>Add your first upstream endpoint to start routing requests.</p></div>
       <div class="provider-grid">
         <article class="card provider-card" *ngFor="let provider of providers">
-          <div class="card-head">
-            <div class="provider-title"><span class="status-dot" [class.off]="!provider.enabled" [class.warn]="health[provider.id]?.status === 'Unhealthy'"></span><div><h3>{{ provider.name }}</h3><code>{{ provider.id }}</code></div></div>
-            <label class="switch" title="Enable provider"><input type="checkbox" [checked]="provider.enabled" (change)="toggleProvider(provider)"><span></span></label>
-          </div>
+          <div class="card-head"><div class="provider-title"><span class="status-dot" [class.off]="!provider.enabled" [class.warn]="health[provider.id]?.status === 'Unhealthy'"></span><div><h3>{{ provider.name }}</h3><code>{{ provider.id }}</code></div></div><label class="switch" title="Enable provider"><input type="checkbox" [checked]="provider.enabled" (change)="toggleProvider(provider)"><span></span></label></div>
           <div class="provider-url">{{ provider.baseUrl }}</div>
           <dl class="stats"><div><dt>Health</dt><dd>{{ health[provider.id]?.status || 'Unknown' }}</dd></div><div><dt>Priority</dt><dd>{{ provider.priority }}</dd></div><div><dt>Default model</dt><dd>{{ provider.defaultModel || 'Auto' }}</dd></div></dl>
           <div class="model-list" *ngIf="discoveredModels[provider.id] as models"><span *ngFor="let model of models | slice:0:4">{{ model }}</span><span *ngIf="models.length > 4">+{{ models.length - 4 }}</span></div>
@@ -36,66 +31,57 @@
     </section>
 
     <section *ngIf="activeTab === 'routes'" class="page">
-      <div class="section-heading"><div><h2>Routing rules</h2><p>Compose ordered fallback or round-robin targets across your providers.</p></div><button class="primary" (click)="openAddRoute()">+ Add route</button></div>
+      <div class="section-heading"><div><h2>Routing rules</h2><p>Compose ordered fallback, round-robin, or cache-friendly sticky targets across your providers.</p></div><button class="primary" (click)="openAddRoute()">+ Add route</button></div>
       <div class="empty-card" *ngIf="routes.length === 0"><strong>No routes configured</strong><p>Requests can still address a provider directly. Add a route for reusable routing policies.</p></div>
       <div class="route-list">
         <article class="card route-card" *ngFor="let route of routes">
-          <div class="route-main"><span class="route-icon">{{ route.strategy === 0 ? '↳' : '⟳' }}</span><div><div class="route-name"><h3>{{ route.id }}</h3><span class="badge">{{ route.strategy === 0 ? 'Fallback' : 'Round robin' }}</span><span class="badge muted" *ngIf="!route.enabled">Disabled</span></div><div class="route-targets"><span *ngFor="let target of route.targets">{{ target.providerId }}/{{ target.model }} <small>P{{ target.priority }}</small></span></div></div></div>
+          <div class="route-main"><span class="route-icon">{{ route.strategy === 0 ? '↳' : route.strategy === 1 ? '⟳' : '⚡' }}</span><div><div class="route-name"><h3>{{ route.id }}</h3><span class="badge">{{ routeStrategyName(route.strategy) }}</span><span class="badge muted" *ngIf="!route.enabled">Disabled</span></div><div class="route-targets"><span *ngFor="let target of route.targets">{{ target.providerId }}/{{ target.model }} <small>P{{ target.priority }}</small></span></div></div></div>
           <div class="card-actions compact"><button class="icon-button" title="Edit" (click)="openEditRoute(route)">✎</button><button class="icon-button danger" title="Delete" (click)="deleteRoute(route)">⌫</button></div>
         </article>
       </div>
     </section>
 
+    <section *ngIf="activeTab === 'cache'" class="page cache-page">
+      <div class="section-heading"><div><h2>Cache efficiency & spend</h2><p>Measure routing affinity, upstream cached-token reuse, latency and cost without retaining prompts or session identifiers.</p></div><button (click)="refreshTelemetry()">Refresh telemetry</button></div>
+
+      <div class="metrics-grid" *ngIf="telemetrySummary as summary; else noTelemetry">
+        <article class="card metric-card"><span>Cache ratio</span><strong>{{ ratio(summary.cacheRatio) }}</strong><small>{{ summary.cacheCoverageCount }} measured · {{ summary.cacheCoveragePercentage | number:'1.0-1' }}% coverage</small></article>
+        <article class="card metric-card"><span>Input tokens</span><strong>{{ summary.inputTokens | number }}</strong><small>{{ summary.cachedInputTokens | number }} cached</small></article>
+        <article class="card metric-card"><span>Total spend</span><strong>{{ cost(summary.totalCost) }}</strong><small>reported + valid estimates</small></article>
+        <article class="card metric-card"><span>Average latency</span><strong>{{ summary.averageLatencyMs | number:'1.0-0' }} ms</strong><small>{{ summary.requestCount }} requests · {{ summary.errorCount }} errors</small></article>
+      </div>
+      <ng-template #noTelemetry><div class="empty-card"><strong>No telemetry yet</strong><p>Send traffic through AI Router or run the cache probe below.</p></div></ng-template>
+
+      <div class="cache-columns">
+        <article class="card cache-panel">
+          <div class="panel-head"><div><h3>Providers</h3><p>Cache coverage and spend by selected upstream.</p></div></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Provider</th><th>Requests</th><th>Cache</th><th>Latency</th><th>Cost</th></tr></thead><tbody><tr *ngFor="let row of telemetrySummary?.providers"><td><code>{{ row.key }}</code></td><td>{{ row.requestCount }}</td><td>{{ ratio(row.cacheRatio) }}</td><td>{{ row.averageLatencyMs | number:'1.0-0' }} ms</td><td>{{ cost(row.totalCost) }}</td></tr></tbody></table></div>
+        </article>
+
+        <article class="card cache-panel probe-panel">
+          <div class="panel-head"><div><h3>Cache probe</h3><p>Repeat one identical request with one affinity identity and compare targets/cache hits.</p></div></div>
+          <div class="probe-form"><label class="field"><span>Route / model</span><input [(ngModel)]="probeModel" placeholder="coding"></label><label class="field small"><span>Repeats</span><input type="number" min="1" max="5" [(ngModel)]="probeRepeats"></label><label class="field full"><span>OpenAI-compatible request JSON</span><textarea rows="6" [(ngModel)]="probeRequestText"></textarea></label><button class="primary" [disabled]="probeBusy" (click)="runCacheProbe()">{{ probeBusy ? 'Running…' : 'Run cache probe' }}</button></div>
+          <div class="probe-result" *ngIf="probeResult as result"><div class="probe-summary"><span [class.warn-text]="result.targetChanged">{{ result.targetChanged ? 'Target changed' : 'Target stable' }}</span><strong>{{ ratio(result.cacheRatio) }} cache</strong></div><div class="diagnostics" *ngIf="result.diagnostics.length"><span *ngFor="let diagnostic of result.diagnostics">{{ diagnostic }}</span></div><p *ngIf="result.recommendation">{{ result.recommendation }}</p><div class="table-wrap"><table class="data-table"><thead><tr><th>#</th><th>Target</th><th>Affinity</th><th>Cached</th><th>Latency</th></tr></thead><tbody><tr *ngFor="let attempt of result.attempts"><td>{{ attempt.index }}</td><td><code>{{ attempt.providerId }}/{{ attempt.model }}</code></td><td>{{ attempt.affinity }}</td><td>{{ attempt.usage?.cachedInputTokens ?? '—' }}</td><td>{{ attempt.latencyMs | number:'1.0-0' }} ms</td></tr></tbody></table></div></div>
+        </article>
+      </div>
+
+      <article class="card cache-panel recent-panel">
+        <div class="panel-head"><div><h3>Recent routing</h3><p>Bounded metadata only—no prompts, response bodies, keys, or session identifiers.</p></div></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Route</th><th>Target</th><th>Affinity</th><th>Attempts</th><th>Input</th><th>Cached</th><th>Cost</th><th>Status</th></tr></thead><tbody><tr *ngFor="let row of telemetryRecent | slice:0:50"><td>{{ row.routeId }}</td><td><code>{{ row.providerId }}/{{ row.model }}</code></td><td>{{ row.affinityClassification }}</td><td>{{ row.attemptCount }}</td><td>{{ row.usage?.inputTokens ?? '—' }}</td><td>{{ row.usage?.cachedInputTokens ?? '—' }}</td><td>{{ cost(row.cost) }}</td><td>{{ row.success ? 'OK' : row.statusCode }}</td></tr></tbody></table></div>
+      </article>
+    </section>
+
     <section *ngIf="activeTab === 'backup'" class="page backup-grid">
-      <article class="card backup-card">
-        <div class="feature-icon">↓</div><h2>Export configuration</h2><p>Download providers and routes as a portable schema-versioned JSON file.</p>
-        <label class="check-row"><input type="checkbox" [(ngModel)]="includeSecrets"><span><strong>Include API keys</strong><small>Off by default. Files with secrets should be treated as sensitive.</small></span></label>
-        <button class="primary wide" (click)="exportConfiguration()">Export JSON</button>
-      </article>
-      <article class="card backup-card">
-        <div class="feature-icon">↑</div><h2>Import configuration</h2><p>Restore or migrate an AI Router configuration from JSON.</p>
-        <label class="file-drop"><input type="file" accept="application/json,.json" (change)="selectImportFile($event)"><strong>{{ importFileName || 'Choose configuration file' }}</strong><span *ngIf="!importDocument">Schema version 1 JSON</span><span *ngIf="importDocument">{{ importDocument.providers.length }} providers · {{ importDocument.routes.length }} routes</span></label>
-        <div class="mode-picker"><label [class.selected]="importMode === 'merge'"><input type="radio" name="importMode" value="merge" [(ngModel)]="importMode"><span><strong>Merge</strong><small>Add or update matching ids.</small></span></label><label [class.selected]="importMode === 'replace'"><input type="radio" name="importMode" value="replace" [(ngModel)]="importMode"><span><strong>Replace</strong><small>Also delete ids absent from the file.</small></span></label></div>
-        <button class="primary wide" [disabled]="!importDocument || busy" (click)="importConfiguration()">Import configuration</button>
-      </article>
+      <article class="card backup-card"><div class="feature-icon">↓</div><h2>Export configuration</h2><p>Download providers and routes as a portable schema-versioned JSON file.</p><label class="check-row"><input type="checkbox" [(ngModel)]="includeSecrets"><span><strong>Include API keys</strong><small>Off by default. Files with secrets should be treated as sensitive.</small></span></label><button class="primary wide" (click)="exportConfiguration()">Export JSON</button></article>
+      <article class="card backup-card"><div class="feature-icon">↑</div><h2>Import configuration</h2><p>Restore or migrate an AI Router configuration from JSON.</p><label class="file-drop"><input type="file" accept="application/json,.json" (change)="selectImportFile($event)"><strong>{{ importFileName || 'Choose configuration file' }}</strong><span *ngIf="!importDocument">Schema version 1 JSON</span><span *ngIf="importDocument">{{ importDocument.providers.length }} providers · {{ importDocument.routes.length }} routes</span></label><div class="mode-picker"><label [class.selected]="importMode === 'merge'"><input type="radio" name="importMode" value="merge" [(ngModel)]="importMode"><span><strong>Merge</strong><small>Add or update matching ids.</small></span></label><label [class.selected]="importMode === 'replace'"><input type="radio" name="importMode" value="replace" [(ngModel)]="importMode"><span><strong>Replace</strong><small>Also delete ids absent from the file.</small></span></label></div><button class="primary wide" [disabled]="!importDocument || busy" (click)="importConfiguration()">Import configuration</button></article>
     </section>
   </main>
 </div>
 
-<ng-template #unlockView>
-  <div class="unlock-shell"><div class="unlock-card"><div class="brand-mark large">AR</div><p class="eyebrow">AI Router</p><h1>Unlock admin console</h1><p>Enter the value configured in <code>AIROUTER_ADMIN_KEY</code>. It stays only in this browser session.</p><label class="field"><span>Admin key</span><input type="password" autocomplete="current-password" [(ngModel)]="adminKey" (keyup.enter)="unlock()" placeholder="••••••••••••"></label><p class="error" *ngIf="unlockError">{{ unlockError }}</p><button class="primary wide" [disabled]="busy" (click)="unlock()">{{ busy ? 'Checking…' : 'Unlock' }}</button></div></div>
-</ng-template>
+<ng-template #unlockView><div class="unlock-shell"><div class="unlock-card"><div class="brand-mark large">AR</div><p class="eyebrow">AI Router</p><h1>Unlock admin console</h1><p>Enter the value configured in <code>AIROUTER_ADMIN_KEY</code>. It stays only in this browser session.</p><label class="field"><span>Admin key</span><input type="password" autocomplete="current-password" [(ngModel)]="adminKey" (keyup.enter)="unlock()" placeholder="••••••••••••"></label><p class="error" *ngIf="unlockError">{{ unlockError }}</p><button class="primary wide" [disabled]="busy" (click)="unlock()">{{ busy ? 'Checking…' : 'Unlock' }}</button></div></div></ng-template>
 
-<div class="modal-backdrop" *ngIf="providerEditor as editor" (mousedown)="closeProvider()">
-  <section class="modal" (mousedown)="$event.stopPropagation()">
-    <div class="modal-head"><div><p class="eyebrow">{{ editingProvider ? 'Edit provider' : 'New provider' }}</p><h2>{{ editingProvider ? editor.name : 'Connect upstream' }}</h2></div><button class="icon-button" (click)="closeProvider()">×</button></div>
-    <div class="form-grid">
-      <label class="field"><span>Provider id</span><input [(ngModel)]="editor.id" [disabled]="editingProvider" placeholder="openai"></label>
-      <label class="field"><span>Name</span><input [(ngModel)]="editor.name" placeholder="OpenAI"></label>
-      <label class="field full"><span>Base URL</span><input [(ngModel)]="editor.baseUrl" placeholder="https://api.openai.com/v1/"></label>
-      <label class="field full"><span>API key <small *ngIf="editingProvider">— leave blank to keep existing</small></span><input type="password" [(ngModel)]="editor.apiKey" placeholder="Optional"></label>
-      <label class="field"><span>Priority</span><input type="number" [(ngModel)]="editor.priority"></label>
-      <label class="field"><span>Timeout (seconds)</span><input type="number" [(ngModel)]="editor.timeoutSeconds"></label>
-      <label class="field full"><span>Default model</span><input [(ngModel)]="editor.defaultModel" placeholder="gpt-5-mini"></label>
-      <label class="field full"><span>Known models <small>one per line</small></span><textarea rows="4" [(ngModel)]="editor.modelsText"></textarea></label>
-    </div>
-    <details><summary>Advanced settings</summary><div class="form-grid advanced">
-      <label class="field full"><span>Extra headers (JSON object)</span><textarea rows="4" [(ngModel)]="editor.extraHeadersText" placeholder='{"X-Tenant":"acme"}'></textarea></label>
-      <label class="field"><span>Chat endpoint</span><input [(ngModel)]="editor.chatEndpoint"></label><label class="field"><span>Responses endpoint</span><input [(ngModel)]="editor.responsesEndpoint"></label><label class="field full"><span>Models endpoint</span><input [(ngModel)]="editor.modelsEndpoint"></label>
-      <label class="check-row"><input type="checkbox" [(ngModel)]="editor.discoverModels"><span><strong>Discover models</strong></span></label><label class="check-row"><input type="checkbox" [(ngModel)]="editor.supportsNativeResponses"><span><strong>Native Responses API</strong></span></label><label class="check-row"><input type="checkbox" [(ngModel)]="editor.enabled"><span><strong>Enabled</strong></span></label>
-    </div></details>
-    <div class="modal-actions"><button (click)="closeProvider()">Cancel</button><button class="primary" [disabled]="busy" (click)="saveProvider()">Save provider</button></div>
-  </section>
-</div>
+<div class="modal-backdrop" *ngIf="providerEditor as editor" (mousedown)="closeProvider()"><section class="modal" (mousedown)="$event.stopPropagation()"><div class="modal-head"><div><p class="eyebrow">{{ editingProvider ? 'Edit provider' : 'New provider' }}</p><h2>{{ editingProvider ? editor.name : 'Connect upstream' }}</h2></div><button class="icon-button" (click)="closeProvider()">×</button></div><div class="form-grid"><label class="field"><span>Provider id</span><input [(ngModel)]="editor.id" [disabled]="editingProvider" placeholder="openai"></label><label class="field"><span>Name</span><input [(ngModel)]="editor.name" placeholder="OpenAI"></label><label class="field full"><span>Base URL</span><input [(ngModel)]="editor.baseUrl" placeholder="https://api.openai.com/v1/"></label><label class="field full"><span>API key <small *ngIf="editingProvider">— leave blank to keep existing</small></span><input type="password" [(ngModel)]="editor.apiKey" placeholder="Optional"></label><label class="field"><span>Priority</span><input type="number" [(ngModel)]="editor.priority"></label><label class="field"><span>Timeout (seconds)</span><input type="number" [(ngModel)]="editor.timeoutSeconds"></label><label class="field full"><span>Default model</span><input [(ngModel)]="editor.defaultModel" placeholder="gpt-5-mini"></label><label class="field full"><span>Known models <small>one per line</small></span><textarea rows="4" [(ngModel)]="editor.modelsText"></textarea></label></div><details><summary>Advanced settings</summary><div class="form-grid advanced"><label class="field full"><span>Extra headers (JSON object)</span><textarea rows="4" [(ngModel)]="editor.extraHeadersText" placeholder='{"X-Tenant":"acme"}'></textarea></label><label class="field"><span>Chat endpoint</span><input [(ngModel)]="editor.chatEndpoint"></label><label class="field"><span>Responses endpoint</span><input [(ngModel)]="editor.responsesEndpoint"></label><label class="field full"><span>Models endpoint</span><input [(ngModel)]="editor.modelsEndpoint"></label><label class="check-row"><input type="checkbox" [(ngModel)]="editor.discoverModels"><span><strong>Discover models</strong></span></label><label class="check-row"><input type="checkbox" [(ngModel)]="editor.supportsNativeResponses"><span><strong>Native Responses API</strong></span></label><label class="check-row"><input type="checkbox" [(ngModel)]="editor.enabled"><span><strong>Enabled</strong></span></label></div></details><div class="modal-actions"><button (click)="closeProvider()">Cancel</button><button class="primary" [disabled]="busy" (click)="saveProvider()">Save provider</button></div></section></div>
 
-<div class="modal-backdrop" *ngIf="routeEditor as route" (mousedown)="closeRoute()">
-  <section class="modal route-modal" (mousedown)="$event.stopPropagation()">
-    <div class="modal-head"><div><p class="eyebrow">{{ editingRoute ? 'Edit route' : 'New route' }}</p><h2>Routing policy</h2></div><button class="icon-button" (click)="closeRoute()">×</button></div>
-    <div class="form-grid"><label class="field"><span>Route id</span><input [(ngModel)]="route.id" [disabled]="editingRoute" placeholder="coding"></label><label class="field"><span>Strategy</span><select [(ngModel)]="route.strategy"><option [ngValue]="0">Fallback</option><option [ngValue]="1">Round robin</option></select></label><label class="check-row full"><input type="checkbox" [(ngModel)]="route.enabled"><span><strong>Route enabled</strong></span></label></div>
-    <div class="targets-head"><div><strong>Targets</strong><small>Ordered upstream choices</small></div><button (click)="addTarget()">+ Add target</button></div>
-    <div class="target-row" *ngFor="let target of route.targets; let index = index"><span class="target-order">{{ index + 1 }}</span><label class="field"><span>Provider</span><select [(ngModel)]="target.providerId"><option *ngFor="let provider of providers" [value]="provider.id">{{ provider.name }}</option></select></label><label class="field"><span>Model</span><input [(ngModel)]="target.model" [attr.list]="'models-' + index"><datalist [id]="'models-' + index"><option *ngFor="let model of modelsFor(target.providerId)" [value]="model"></option></datalist></label><label class="field small"><span>Priority</span><input type="number" [(ngModel)]="target.priority"></label><label class="target-enabled"><input type="checkbox" [(ngModel)]="target.enabled"> On</label><button class="icon-button danger" (click)="removeTarget(index)" title="Remove target">×</button></div>
-    <div class="modal-actions"><button (click)="closeRoute()">Cancel</button><button class="primary" [disabled]="busy" (click)="saveRoute()">Save route</button></div>
-  </section>
-</div>
+<div class="modal-backdrop" *ngIf="routeEditor as route" (mousedown)="closeRoute()"><section class="modal route-modal" (mousedown)="$event.stopPropagation()"><div class="modal-head"><div><p class="eyebrow">{{ editingRoute ? 'Edit route' : 'New route' }}</p><h2>Routing policy</h2></div><button class="icon-button" (click)="closeRoute()">×</button></div><div class="form-grid"><label class="field"><span>Route id</span><input [(ngModel)]="route.id" [disabled]="editingRoute" placeholder="coding"></label><label class="field"><span>Strategy</span><select [(ngModel)]="route.strategy"><option [ngValue]="0">Fallback</option><option [ngValue]="1">Round robin</option><option [ngValue]="2">Sticky (cache-friendly)</option></select></label><label class="check-row full"><input type="checkbox" [(ngModel)]="route.enabled"><span><strong>Route enabled</strong></span></label></div><div class="targets-head"><div><strong>Targets</strong><small>Ordered upstream choices</small></div><button (click)="addTarget()">+ Add target</button></div><div class="target-row" *ngFor="let target of route.targets; let index = index"><span class="target-order">{{ index + 1 }}</span><label class="field"><span>Provider</span><select [(ngModel)]="target.providerId"><option *ngFor="let provider of providers" [value]="provider.id">{{ provider.name }}</option></select></label><label class="field"><span>Model</span><input [(ngModel)]="target.model" [attr.list]="'models-' + index"><datalist [id]="'models-' + index"><option *ngFor="let model of modelsFor(target.providerId)" [value]="model"></option></datalist></label><label class="field small"><span>Priority</span><input type="number" [(ngModel)]="target.priority"></label><label class="target-enabled"><input type="checkbox" [(ngModel)]="target.enabled"> On</label><button class="icon-button danger" (click)="removeTarget(index)" title="Remove target">×</button></div><div class="modal-actions"><button (click)="closeRoute()">Cancel</button><button class="primary" [disabled]="busy" (click)="saveRoute()">Save route</button></div></section></div>
 
 <div class="toast" *ngIf="toast">{{ toast }}</div><div class="busy-bar" *ngIf="busy"></div>

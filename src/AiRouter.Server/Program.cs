@@ -56,6 +56,7 @@ if (!string.IsNullOrWhiteSpace(adminKey))
 {
     app.MapAiRouterManagementEndpoints(adminKey);
     app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+    app.MapAiRouterTelemetryManagementEndpoints(adminKey);
 }
 
 app.MapFallbackToFile("/admin/{*path:nonfile}", "admin/index.html");

@@ -2,6 +2,7 @@ using AiRouter.Configuration;
 using AiRouter.Providers;
 using AiRouter.Providers.OpenAI;
 using AiRouter.Routing;
+using AiRouter.Telemetry;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -20,6 +21,8 @@ public static class AiRouterServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IProviderStore, InMemoryProviderStore>();
         services.TryAddSingleton<IRouteStore, InMemoryRouteStore>();
+        services.TryAddSingleton<IAffinityStore, InMemoryAffinityStore>();
+        services.TryAddSingleton<IRouterTelemetry>(_ => new InMemoryRouterTelemetry(options.TelemetryRecentCapacity));
         services.TryAddSingleton<IProviderManager, ProviderManager>();
         services.TryAddSingleton<RouteResolver>();
         services.TryAddSingleton<IAiRouter, AiRouterService>();

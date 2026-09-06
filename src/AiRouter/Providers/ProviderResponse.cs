@@ -23,6 +23,7 @@ public sealed class ProviderResponse
     public string? ErrorMessage { get; init; }
     public DateTimeOffset? RetryAfter { get; init; }
     public bool StreamCommitted { get; init; }
+    public ProviderUsage? Usage => ProviderUsageParser.ParseOpenAiCompatible(Body);
 
     public static ProviderResponse Failed(ProviderFailureKind kind, int statusCode, string message) =>
         new() { FailureKind = kind, StatusCode = statusCode, ErrorMessage = message };
