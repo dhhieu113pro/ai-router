@@ -14,7 +14,7 @@ There are exactly two public NuGet packages.
 
 [View `AIRouter.Core` on NuGet.org](https://www.nuget.org/packages/AIRouter.Core)
 
-Use `AIRouter.Core` in console apps, workers, Windows services, desktop apps, MCP servers, or any other .NET project. Core includes provider management, built-in OpenAI-compatible upstream providers, fallback and round-robin routing, Responses support, streaming, health/cooldown behavior, and in-memory provider/route stores.
+Use `AIRouter.Core` in console apps, workers, Windows services, desktop apps, MCP servers, or any other .NET project. Core includes provider management, built-in OpenAI-compatible upstream providers, fallback, round-robin and sticky cache-affinity routing, Responses support, streaming, health/cooldown behavior, usage/cost telemetry, and in-memory provider/route stores.
 
 ```bash
 dotnet add package AIRouter.Core --version 0.0.1
@@ -75,9 +75,58 @@ Management endpoints are optional and can use the same bearer key:
 ```csharp
 app.MapAiRouterManagementEndpoints(adminKey);
 app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+app.MapAiRouterTelemetryManagementEndpoints(adminKey);
 ```
 
 See [docs/library-usage.md](docs/library-usage.md) for provider, route, custom-host, and streaming examples.
+
+## Cache-affinity routing
+
+Long-running coding-agent sessions repeatedly resend a large stable prompt prefix. A per-request round-robin policy can move consecutive turns to different upstream workers and destroy provider-local prompt-cache reuse. `RoutingStrategy.Sticky` keeps one logical session on one healthy route target and only rebinds after a safe fallback.
+
+Example route JSON:
+
+```json
+{
+  "id": "coding",
+  "strategy": 2,
+  "targets": [
+    { "providerId": "openrouter-a", "model": "deepseek-v4-flash", "priority": 10 },
+    { "providerId": "openrouter-b", "model": "deepseek-v4-flash", "priority": 20 }
+  ]
+}
+```
+
+For best affinity, clients should send a stable conversation id on every turn:
+
+```http
+X-AiRouter-Session: coding-session-123
+```
+
+AIRouter hashes this value before routing. The raw session id is never returned and is not stored in telemetry. When the header is absent, the ASP.NET adapter next uses the OpenAI-compatible `user` field, then a fingerprint of stable leading system/developer/instructions content; otherwise Sticky falls back to a deterministic route-level target.
+
+Responses add routing diagnostics:
+
+```text
+X-AiRouter-Provider
+X-AiRouter-Model
+X-AiRouter-Affinity: hit|miss|route|pinned
+X-AiRouter-Affinity-Source: header|user|prefix|route
+X-AiRouter-Fallback: true|false
+X-AiRouter-Attempts: <n>
+```
+
+When admin management is enabled, the standalone server also exposes:
+
+```text
+GET  /telemetry/summary
+GET  /telemetry/recent
+POST /probe/cache
+```
+
+Telemetry is bounded and records routing metadata, latency, normalized usage, cache coverage, and reported/validly-estimated cost. It does not retain prompts, response bodies, API keys, or raw session ids. Provider definitions can optionally configure `inputPricePerMillion`, `cachedInputPricePerMillion`, and `outputPricePerMillion`; reported upstream cost always wins over an estimate.
+
+A provider id in AIRouter identifies the configured upstream endpoint. If that endpoint is itself an aggregator that silently load-balances one model across multiple backend workers, Sticky routing to the aggregator alone may not preserve the aggregator's internal cache. In that case also use the upstream's provider/backend pinning controls or represent pinned backends as separate AIRouter providers.
 
 ## Standalone server and Angular admin
 
@@ -105,7 +154,9 @@ The admin console provides:
 
 - provider add/edit/delete and enable/disable,
 - priority, health, connectivity tests, and model discovery,
-- fallback and round-robin route editing,
+- fallback, round-robin and sticky route editing,
+- cache ratio/coverage, token, cost and latency observability,
+- an authenticated repeated-request cache probe,
 - JSON configuration import/export,
 - responsive system light/dark appearance.
 

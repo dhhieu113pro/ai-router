@@ -20,10 +20,11 @@ Core includes:
 - provider management through `IProviderManager`
 - built-in OpenAI-compatible upstream providers
 - model discovery
-- fallback and round-robin routes
+- fallback, round-robin, and sticky cache-affinity routes
 - provider health/cooldown behavior
 - Chat Completions and Responses-style routing
 - streaming
+- bounded in-memory routing/cache/cost telemetry
 - in-memory provider and route stores by default
 - replaceable `IProviderStore` and `IRouteStore` abstractions
 
@@ -56,7 +57,7 @@ var services = new ServiceCollection();
 services.AddAiRouter();
 ```
 
-`AddAiRouter()` registers the routing engine, in-memory stores, provider manager, and the built-in OpenAI-compatible provider support.
+`AddAiRouter()` registers the routing engine, in-memory stores, provider manager, affinity store, bounded telemetry collector, and the built-in OpenAI-compatible provider support.
 
 In an application using dependency injection, resolve the public services normally:
 
@@ -80,12 +81,19 @@ await providerManager.AddAsync(new ProviderDefinition(
     Enabled: true,
     Priority: 10,
     Models: ["openai/gpt-5", "anthropic/claude-sonnet-4.6"],
-    DefaultModel: "openai/gpt-5"), cancellationToken);
+    DefaultModel: "openai/gpt-5",
+    InputPricePerMillion: 1.0m,
+    CachedInputPricePerMillion: 0.1m,
+    OutputPricePerMillion: 2.0m), cancellationToken);
 ```
+
+Pricing is optional and is used only to estimate cost when upstream usage contains enough token detail and no reported cost is available. If cached input tokens are present but `CachedInputPricePerMillion` is missing, AIRouter leaves estimated cost unknown instead of guessing.
 
 Provider changes are available to new requests without restarting the process.
 
-## 3. Define a fallback route
+## 3. Define routes
+
+Fallback route:
 
 ```csharp
 var route = new RouteDefinition(
@@ -100,9 +108,35 @@ var route = new RouteDefinition(
 await routeStore.UpsertAsync(route, cancellationToken);
 ```
 
-Callers can now use the stable logical model name `coding`; AIRouter selects the preferred target and falls back on eligible failures.
-
 Round-robin uses the same route model with `RoutingStrategy.RoundRobin`.
+
+For coding agents and other long conversations, prefer `RoutingStrategy.Sticky` when upstream prompt-cache locality matters:
+
+```csharp
+await routeStore.UpsertAsync(new RouteDefinition(
+    Id: "coding",
+    Strategy: RoutingStrategy.Sticky,
+    Targets:
+    [
+        new RouteTarget("openrouter-a", "deepseek-v4-flash", Priority: 10),
+        new RouteTarget("openrouter-b", "deepseek-v4-flash", Priority: 20)
+    ]), cancellationToken);
+```
+
+Equivalent management JSON uses `strategy: 2`:
+
+```json
+{
+  "id": "coding",
+  "strategy": 2,
+  "targets": [
+    { "providerId": "openrouter-a", "model": "deepseek-v4-flash", "priority": 10 },
+    { "providerId": "openrouter-b", "model": "deepseek-v4-flash", "priority": 20 }
+  ]
+}
+```
+
+Sticky affinity is opt-in; existing Fallback and RoundRobin semantics are unchanged.
 
 ## 4. Call `IAiRouter` directly
 
@@ -132,7 +166,20 @@ if (!result.Success)
     throw new InvalidOperationException(result.ErrorMessage);
 ```
 
-`RouterResult` identifies the actual selected provider/model as well as the body/stream and status information.
+For direct Core use with Sticky, pass an opaque stable affinity key through `RouterRequestContext`:
+
+```csharp
+var result = await router.ChatAsync(
+    "coding",
+    document.RootElement,
+    new RouterRequestContext(
+        AffinityKey: stableConversationHash,
+        AffinitySource: "application"),
+    stream: false,
+    ct: cancellationToken);
+```
+
+`RouterResult` identifies the selected provider/model and exposes affinity/fallback/attempt metadata. Existing `IAiRouter` implementers remain source-compatible: the new context-aware interface overloads have default implementations that delegate to the legacy methods.
 
 ## 5. Streaming
 
@@ -153,7 +200,7 @@ if (result.Stream is not null)
 }
 ```
 
-The consumer owns disposal of the returned stream. AIRouter can fall back before a stream is committed; it never switches provider after upstream streaming has been committed.
+The consumer owns disposal of the returned stream. AIRouter can fall back before a stream is committed; it never switches provider after upstream streaming has been committed. Streaming usage is recorded only when an adapter can expose it without changing externally visible streaming semantics.
 
 ## 6. Use your own API shape
 
@@ -183,7 +230,7 @@ app.MapPost("/api/assistant", async (
 });
 ```
 
-Your host owns URLs, auth, DTOs, telemetry, and lifecycle; AIRouter owns provider selection/routing.
+Your host owns URLs, auth, DTOs and lifecycle; AIRouter owns provider selection/routing and its provider-neutral routing telemetry.
 
 ## 7. Host OpenAI-compatible `/v1`
 
@@ -207,7 +254,26 @@ To host AIRouter below another path, pass a prefix:
 app.UseAiRouter("api");
 ```
 
-This maps the same OpenAI-compatible endpoints at `/api/v1/chat/completions`, `/api/v1/responses`, and `/api/v1/models`. Prefixes are normalized, so `api`, `/api`, `api/`, and `/api/` behave the same.
+This maps the same OpenAI-compatible endpoints at `/api/v1/chat/completions`, `/api/v1/responses`, and `/api/v1/models`.
+
+For a Sticky route, send one stable conversation id on every turn:
+
+```http
+X-AiRouter-Session: coding-session-123
+```
+
+The ASP.NET adapter hashes this value before it reaches affinity storage. The raw header value is never returned or stored in telemetry. Identity precedence is `X-AiRouter-Session`, then OpenAI `user`, then a fingerprint of stable leading system/developer/instructions content, then deterministic route-level selection.
+
+Successful responses include:
+
+```text
+X-AiRouter-Provider
+X-AiRouter-Model
+X-AiRouter-Affinity: hit|miss|route|pinned
+X-AiRouter-Affinity-Source: header|user|prefix|route
+X-AiRouter-Fallback: true|false
+X-AiRouter-Attempts: <n>
+```
 
 Bearer-key protection is still available when needed:
 
@@ -219,13 +285,31 @@ Management endpoints remain opt-in and separate:
 
 ```csharp
 app.MapAiRouterManagementEndpoints(adminKey);
+app.MapAiRouterConfigurationManagementEndpoints(adminKey);
+app.MapAiRouterTelemetryManagementEndpoints(adminKey);
 ```
 
-Your application can instead expose its own management UI/API over `IProviderManager` and `IRouteStore`.
+The telemetry extension adds authenticated:
 
-## 8. Use your own persistence
+```text
+GET  /telemetry/summary
+GET  /telemetry/recent
+POST /probe/cache
+```
 
-Core defaults to in-memory providers/routes. To persist them in your existing database/configuration system, implement and register the abstractions before `AddAiRouter()`:
+`/probe/cache` repeats one small identical request using one generated affinity identity and reports selected targets, latency, available cached-token data, cost data, target instability, and a Sticky/direct-pin recommendation when appropriate. It never modifies route configuration.
+
+Telemetry is bounded and deliberately excludes prompts, tool output, response bodies, API keys, raw session ids, and affinity keys.
+
+## 8. Upstream aggregators and cache locality
+
+Sticky can only control the provider/model target visible to AIRouter. If one configured provider is itself a gateway that load-balances the same model across multiple hidden workers, those internal hops can still defeat provider-local prompt caches. In that case use the upstream gateway's provider/backend pinning feature as well, or model the pinned backends as separate AIRouter provider definitions.
+
+This distinction is important for gateways such as multi-provider aggregators: `openrouter-a/deepseek-v4-flash` is stable from AIRouter's perspective only if the upstream configuration behind `openrouter-a` is also stable enough for its cache semantics.
+
+## 9. Use your own persistence
+
+Core defaults to in-memory providers/routes and in-memory affinity/telemetry. To persist provider/route configuration in your existing database/configuration system, implement and register the abstractions before `AddAiRouter()`:
 
 ```csharp
 builder.Services.AddSingleton<IProviderStore, MyProviderStore>();
@@ -233,15 +317,15 @@ builder.Services.AddSingleton<IRouteStore, MyRouteStore>();
 builder.Services.AddAiRouter();
 ```
 
-Core uses replaceable registrations, so application-owned stores stay in control.
+Core uses replaceable registrations, so application-owned stores stay in control. Phase 1 affinity is intentionally in-memory and may reset on process restart.
 
-## 9. Implement another upstream protocol
+## 10. Implement another upstream protocol
 
 Implement `IAiProvider` and `IAiProviderFactory` when an upstream is not OpenAI-compatible. Provider adapters translate the routed JSON payload, provide streaming/non-streaming responses and model/health behavior, and classify failures so Core knows when fallback is allowed.
 
-## 10. `AiRouter.Server` is optional
+## 11. `AiRouter.Server` is optional
 
-Use `AiRouter.Server` when you want the ready-made gateway/container. It composes the two public libraries with internal SQLite persistence.
+Use `AiRouter.Server` when you want the ready-made gateway/container. It composes the two public libraries with internal SQLite persistence and the Angular Cache & Cost admin view.
 
 Do not depend on the server project merely to access routing.
 
