@@ -91,7 +91,7 @@ public sealed class AiRouterService : IAiRouter
             var start = _roundRobinIndices.AddOrUpdate(route.RouteId, 0, static (_, current) => unchecked(current + 1));
             eligible = Rotate(eligible, (int)((uint)start % (uint)eligible.Length));
         }
-        else if (route.Strategy == RoutingStrategy.Sticky && !route.Pinned && eligible.Length > 1)
+        else if (route.Strategy == RoutingStrategy.Sticky && !route.Pinned)
         {
             var key = requestContext?.AffinityKey;
             if (!string.IsNullOrWhiteSpace(key) && _affinity.TryGet(route.RouteId, key, DateTimeOffset.UtcNow, out var stored))
