@@ -62,16 +62,32 @@ public sealed class CacheProbeBranchCoverageTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => CacheProbe.RunAsync(router, providers, null!));
     }
 
-    private static RouterResult Result(string? provider, ProviderUsage? usage) => new()
+    private static RouterResult Result(string? provider, ProviderUsage? usage)
     {
-        Success = true,
-        StatusCode = 200,
-        ProviderId = provider,
-        Model = "model",
-        Usage = usage,
-        AffinityClassification = "hit",
-        AttemptCount = 1
-    };
+        JsonElement? body = usage is null
+            ? null
+            : JsonSerializer.SerializeToElement(new
+            {
+                usage = new
+                {
+                    prompt_tokens = usage.InputTokens,
+                    completion_tokens = usage.OutputTokens,
+                    total_tokens = usage.TotalTokens,
+                    prompt_tokens_details = new { cached_tokens = usage.CachedInputTokens }
+                }
+            });
+
+        return new RouterResult
+        {
+            Success = true,
+            StatusCode = 200,
+            ProviderId = provider,
+            Model = "model",
+            Body = body,
+            AffinityClassification = "hit",
+            AttemptCount = 1
+        };
+    }
 
     private static async Task<IProviderManager> EmptyProvidersAsync()
     {
