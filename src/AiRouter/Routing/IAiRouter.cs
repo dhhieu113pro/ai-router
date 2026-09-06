@@ -14,6 +14,7 @@ public sealed class RouterResult
     public string? ContentType { get; init; }
     public string? ErrorMessage { get; init; }
     public ProviderFailureKind FailureKind { get; init; }
+    public ProviderUsage? Usage => ProviderUsageParser.ParseOpenAiCompatible(Body);
     public bool AffinityApplied { get; init; }
     public string AffinitySource { get; init; } = "route";
     public bool AffinityRebound { get; init; }
