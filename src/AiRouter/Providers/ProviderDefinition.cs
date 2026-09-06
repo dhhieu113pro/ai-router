@@ -16,7 +16,10 @@ public sealed record ProviderDefinition(
     string? ChatEndpoint = null,
     string? ResponsesEndpoint = null,
     string? ModelsEndpoint = null,
-    bool SupportsNativeResponses = true)
+    bool SupportsNativeResponses = true,
+    decimal? InputPricePerMillion = null,
+    decimal? CachedInputPricePerMillion = null,
+    decimal? OutputPricePerMillion = null)
 {
     public TimeSpan EffectiveTimeout => Timeout ?? TimeSpan.FromSeconds(120);
     public ProviderDefinition Redacted() => this with { ApiKey = null };
