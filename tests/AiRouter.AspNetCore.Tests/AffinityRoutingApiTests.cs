@@ -12,9 +12,7 @@ public sealed class AffinityRoutingApiTests
         var context = new DefaultHttpContext();
         context.Request.Headers["X-AiRouter-Session"] = "session-123";
         var body = JsonDocument.Parse("{\"user\":\"user-456\",\"messages\":[{\"role\":\"system\",\"content\":\"stable\"}]}").RootElement.Clone();
-
         var resolved = AffinityKeyResolver.Resolve(context, "route", body);
-
         Assert.Equal("header", resolved.AffinitySource);
         Assert.NotEqual("session-123", resolved.AffinityKey);
         Assert.Equal(64, resolved.AffinityKey!.Length);
@@ -25,8 +23,7 @@ public sealed class AffinityRoutingApiTests
     {
         var context = new DefaultHttpContext();
         var body = JsonDocument.Parse("{\"user\":\"user-456\",\"messages\":[{\"role\":\"system\",\"content\":\"stable\"}]}").RootElement.Clone();
-        var resolved = AffinityKeyResolver.Resolve(context, "route", body);
-        Assert.Equal("user", resolved.AffinitySource);
+        Assert.Equal("user", AffinityKeyResolver.Resolve(context, "route", body).AffinitySource);
     }
 
     [Fact]
@@ -44,22 +41,30 @@ public sealed class AffinityRoutingApiTests
     {
         var context = new DefaultHttpContext();
         var body = JsonDocument.Parse("""
-        {
-          "messages": [
-            {
-              "role": "system",
-              "content": [" first ", {"text":"second"}, {"image_url":"ignored"}, 42]
-            },
-            {"role":"developer","content":[{"text":" third "}]},
-            {"role":"user","content":"stop"}
-          ]
-        }
+        {"messages":[{"role":"system","content":[" first ",{"text":"second"},{"image_url":"ignored"},42]},{"role":"developer","content":[{"text":" third "}]},{"role":"user","content":"stop"}]}
         """).RootElement.Clone();
-
         var resolved = AffinityKeyResolver.Resolve(context, "route", body);
-
         Assert.Equal("prefix", resolved.AffinitySource);
         Assert.Equal(64, resolved.AffinityKey!.Length);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{\"instructions\":42}")]
+    [InlineData("{\"instructions\":[]}")]
+    [InlineData("{\"messages\":{}}")]
+    [InlineData("{\"input\":{}}")]
+    [InlineData("{\"messages\":[{\"role\":42,\"content\":\"x\"}]}")]
+    [InlineData("{\"messages\":[{\"role\":\"system\"}]}")]
+    [InlineData("{\"messages\":[{\"role\":\"system\",\"content\":42}]}")]
+    [InlineData("{\"messages\":[{\"role\":\"system\",\"content\":[]}]}")]
+    public void Invalid_or_non_text_prefix_shapes_fall_back_to_route(string json)
+    {
+        var context = new DefaultHttpContext();
+        var body = JsonDocument.Parse(json).RootElement.Clone();
+        var resolved = AffinityKeyResolver.Resolve(context, "route", body);
+        Assert.Equal("route", resolved.AffinitySource);
+        Assert.Null(resolved.AffinityKey);
     }
 
     [Fact]
@@ -67,9 +72,7 @@ public sealed class AffinityRoutingApiTests
     {
         var context = new DefaultHttpContext();
         var body = JsonDocument.Parse("{\"messages\":[42,{\"content\":\"missing role\"}]}").RootElement.Clone();
-
         var resolved = AffinityKeyResolver.Resolve(context, "route", body);
-
         Assert.Equal("route", resolved.AffinitySource);
         Assert.Null(resolved.AffinityKey);
     }
