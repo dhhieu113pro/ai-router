@@ -15,6 +15,18 @@ public sealed class ProviderUsageParserBranchCoverageTests
     }
 
     [Fact]
+    public void Parse_empty_usage_object_has_all_unknown_values()
+    {
+        var usage = Parse("{\"usage\":{}}")!;
+        Assert.Null(usage.InputTokens);
+        Assert.Null(usage.OutputTokens);
+        Assert.Null(usage.TotalTokens);
+        Assert.Null(usage.CachedInputTokens);
+        Assert.Null(usage.CacheWriteTokens);
+        Assert.Null(usage.ReportedCost);
+    }
+
+    [Fact]
     public void Parse_supports_responses_token_names_and_computes_total()
     {
         var usage = Parse("""
