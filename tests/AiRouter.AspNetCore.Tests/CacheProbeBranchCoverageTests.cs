@@ -51,6 +51,19 @@ public sealed class CacheProbeBranchCoverageTests
     }
 
     [Fact]
+    public async Task Probe_resolves_provider_pricing_when_target_is_known()
+    {
+        var providers = await PricedProvidersAsync();
+        var router = new RecordingRouter(Result("priced", new ProviderUsage(10, 2, 12, 5, null, null)));
+        var request = new CacheProbeRequest("coding", JsonDocument.Parse("{}").RootElement.Clone(), 1);
+
+        var result = await CacheProbe.RunAsync(router, providers, request);
+
+        Assert.NotNull(result.Attempts[0].Cost);
+        Assert.Equal("estimated", result.Attempts[0].CostSource);
+    }
+
+    [Fact]
     public async Task Probe_null_arguments_are_rejected()
     {
         var providers = await EmptyProvidersAsync();
@@ -96,6 +109,34 @@ public sealed class CacheProbeBranchCoverageTests
         return manager;
     }
 
+    private static async Task<IProviderManager> PricedProvidersAsync()
+    {
+        var factory = new FakeFactory();
+        var manager = new ProviderManager(new InMemoryProviderStore(), [factory]);
+        await manager.InitializeAsync();
+        await manager.AddAsync(new ProviderDefinition(
+            "priced", "priced", "fake", "https://example.test", "key",
+            Models: ["model"], DefaultModel: "model",
+            InputPricePerMillion: 1m, CachedInputPricePerMillion: 0.1m, OutputPricePerMillion: 2m));
+        return manager;
+    }
+
+    private sealed class FakeFactory : IAiProviderFactory
+    {
+        public bool CanCreate(ProviderDefinition definition) => definition.Type == "fake";
+        public IAiProvider Create(ProviderDefinition definition) => new FakeProvider(definition);
+    }
+
+    private sealed class FakeProvider(ProviderDefinition definition) : IAiProvider
+    {
+        public ProviderDefinition Definition { get; } = definition;
+        public ProviderHealth Health { get; } = new();
+        public Task<ProviderResponse> SendChatAsync(string model, JsonElement requestBody, bool stream, CancellationToken ct = default) => Task.FromResult(new ProviderResponse { Success = true, StatusCode = 200 });
+        public Task<ProviderResponse> SendResponsesAsync(string model, JsonElement requestBody, bool stream, CancellationToken ct = default) => SendChatAsync(model, requestBody, stream, ct);
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(Definition.Models ?? []);
+        public Task<ProviderConnectivityResult> CheckHealthAsync(CancellationToken ct = default) => Task.FromResult(new ProviderConnectivityResult(true));
+    }
+
     private sealed class RecordingRouter(RouterResult result) : IAiRouter
     {
         public int ChatCalls { get; private set; }
@@ -107,8 +148,7 @@ public sealed class CacheProbeBranchCoverageTests
             return Task.FromResult(result);
         }
 
-        public Task<RouterResult> ChatAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default) =>
-            ChatAsync(model, body, stream, ct);
+        public Task<RouterResult> ChatAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default) => ChatAsync(model, body, stream, ct);
 
         public Task<RouterResult> ResponsesAsync(string model, JsonElement body, bool stream = false, CancellationToken ct = default)
         {
@@ -116,7 +156,6 @@ public sealed class CacheProbeBranchCoverageTests
             return Task.FromResult(result);
         }
 
-        public Task<RouterResult> ResponsesAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default) =>
-            ResponsesAsync(model, body, stream, ct);
+        public Task<RouterResult> ResponsesAsync(string model, JsonElement body, RouterRequestContext? requestContext, bool stream = false, CancellationToken ct = default) => ResponsesAsync(model, body, stream, ct);
     }
 }
