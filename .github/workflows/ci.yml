@@ -134,6 +134,14 @@ jobs:
       - name: Build container
         run: docker build --tag ai-router:ci .
 
+      - name: Verify configurable AIRouter keys are discoverable in image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect ai-router:ci --format '{{range .Config.Env}}{{println .}}{{end}}' > /tmp/ai-router-image-env
+          grep -qx 'AIROUTER_ADMIN_KEY=' /tmp/ai-router-image-env
+          grep -qx 'AIROUTER_API_KEY=' /tmp/ai-router-image-env
+
       - name: Smoke test container health and Admin UI
         shell: bash
         run: |
