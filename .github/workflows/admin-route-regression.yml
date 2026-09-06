@@ -1,0 +1,38 @@
+name: Admin Route Regression
+
+on:
+  push:
+    branches:
+      - fix/admin-route-no-trailing-slash
+
+permissions:
+  contents: read
+
+jobs:
+  admin-route:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build container
+        run: docker build --tag ai-router:admin-route-test .
+
+      - name: Verify /admin redirects to /admin/
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 18080:8080 ai-router:admin-route-test)"
+          cleanup() { docker rm --force "$container_id" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          headers="$(mktemp)"
+          status="$(curl --silent --output /dev/null --dump-header "$headers" --write-out '%{http_code}' http://127.0.0.1:18080/admin)"
+          test "$status" = "302"
+          grep -qi '^location: /admin/\r\?$' "$headers"
