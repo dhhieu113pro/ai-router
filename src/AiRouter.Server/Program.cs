@@ -35,6 +35,16 @@ if ((await providerManager.ListAsync()).Count == 0)
         SupportsNativeResponses: false));
 }
 
+app.Use(async (context, next) =>
+{
+    if (string.Equals(context.Request.Path.Value, "/admin", StringComparison.Ordinal))
+    {
+        context.Response.Redirect("/admin/");
+        return;
+    }
+
+    await next();
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -48,7 +58,6 @@ if (!string.IsNullOrWhiteSpace(adminKey))
     app.MapAiRouterConfigurationManagementEndpoints(adminKey);
 }
 
-app.MapGet("/admin", () => Results.Redirect("/admin/"));
 app.MapFallbackToFile("/admin/{*path:nonfile}", "admin/index.html");
 
 app.Run();
