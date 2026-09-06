@@ -2,8 +2,17 @@ name: Admin Route Regression
 
 on:
   push:
-    branches:
-      - fix/admin-route-no-trailing-slash
+    paths:
+      - Dockerfile
+      - src/AiRouter.Server/**
+      - src/AiRouter.Admin/**
+      - .github/workflows/admin-route-regression.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - src/AiRouter.Server/**
+      - src/AiRouter.Admin/**
+      - .github/workflows/admin-route-regression.yml
 
 permissions:
   contents: read
@@ -37,4 +46,4 @@ jobs:
           echo "HTTP status: $status"
           cat "$headers"
           test "$status" = "302"
-          grep -qi '^location: /admin/\r\?$' "$headers"
+          tr -d '\r' < "$headers" | grep -qi '^location: /admin/$'
