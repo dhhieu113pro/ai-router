@@ -62,7 +62,7 @@ public sealed class AiRouterService : IAiRouter
         catch (RouteResolutionException ex)
         {
             var failure = new RouterResult { Success = false, StatusCode = 400, FailureKind = ProviderFailureKind.InvalidRequest, ErrorMessage = ex.Message };
-            RecordSafe(failure, model, RoutingStrategy.Fallback, false, null, null, requestStarted, 0);
+            RecordSafe(failure, model, RoutingStrategy.Fallback, false, null, null, null, requestStarted, 0);
             return failure;
         }
 
@@ -74,7 +74,7 @@ public sealed class AiRouterService : IAiRouter
         if (resolved.Length == 0)
         {
             var unavailable = Unavailable("No enabled providers are available for this route.");
-            RecordSafe(unavailable, route.RouteId, route.Strategy, route.Pinned, null, null, requestStarted, 0);
+            RecordSafe(unavailable, route.RouteId, route.Strategy, route.Pinned, null, null, null, requestStarted, 0);
             return unavailable;
         }
 
@@ -84,7 +84,6 @@ public sealed class AiRouterService : IAiRouter
         var affinitySource = requestContext?.AffinitySource ?? "route";
         var classification = route.Pinned ? "pinned" : "route";
         var affinityApplied = false;
-        AffinityEntry? priorAffinity = null;
 
         if (route.Strategy == RoutingStrategy.RoundRobin && !route.Pinned && eligible.Length > 1)
         {
@@ -100,7 +99,6 @@ public sealed class AiRouterService : IAiRouter
                 if (index >= 0)
                 {
                     eligible = Rotate(eligible, index);
-                    priorAffinity = stored;
                     affinityApplied = true;
                     classification = "hit";
                 }
@@ -118,6 +116,7 @@ public sealed class AiRouterService : IAiRouter
 
         ProviderResponse? lastResponse = null;
         ResolvedTarget? lastTarget = null;
+        ProviderDefinition? lastDefinition = null;
         var attempts = 0;
         foreach (var item in eligible)
         {
@@ -143,24 +142,25 @@ public sealed class AiRouterService : IAiRouter
                     _affinity.Set(route.RouteId, key, item.Target, DateTimeOffset.UtcNow, _options.StickyAffinityTtl);
                 }
                 var mapped = Map(response, item.Target, route, affinityApplied, affinitySource, rebound, attempts > 1, attempts, classification);
-                RecordSafe(mapped, route.RouteId, route.Strategy, route.Pinned, response, item.Target, requestStarted, attempts);
+                RecordSafe(mapped, route.RouteId, route.Strategy, route.Pinned, response, item.Target, item.Provider.Definition, requestStarted, attempts);
                 return mapped;
             }
 
             MarkFailure(item.Provider, response, latency);
             lastResponse = response;
             lastTarget = item.Target;
+            lastDefinition = item.Provider.Definition;
             if (response.StreamCommitted || response.FailureKind is ProviderFailureKind.InvalidRequest or ProviderFailureKind.Cancelled)
             {
                 var terminal = Map(response, item.Target, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
-                RecordSafe(terminal, route.RouteId, route.Strategy, route.Pinned, response, item.Target, requestStarted, attempts);
+                RecordSafe(terminal, route.RouteId, route.Strategy, route.Pinned, response, item.Target, item.Provider.Definition, requestStarted, attempts);
                 return terminal;
             }
             if (route.Pinned) break;
         }
 
         var result = Map(lastResponse!, lastTarget!, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
-        RecordSafe(result, route.RouteId, route.Strategy, route.Pinned, lastResponse, lastTarget, requestStarted, attempts);
+        RecordSafe(result, route.RouteId, route.Strategy, route.Pinned, lastResponse, lastTarget, lastDefinition, requestStarted, attempts);
         return result;
     }
 
@@ -171,13 +171,14 @@ public sealed class AiRouterService : IAiRouter
         bool pinned,
         ProviderResponse? response,
         ResolvedTarget? target,
+        ProviderDefinition? definition,
         long requestStarted,
         int attempts)
     {
         try
         {
-            var definition = target is null ? null : FindProvider(target.ProviderId)?.Definition;
-            var cost = CostEstimator.Resolve(response?.Usage, definition);
+            var usage = response?.Usage;
+            var cost = CostEstimator.Resolve(usage, definition);
             _telemetry.Record(new RouterTelemetryRecord(
                 DateTimeOffset.UtcNow,
                 routeId,
@@ -190,7 +191,7 @@ public sealed class AiRouterService : IAiRouter
                 result.AffinityClassification,
                 attempts,
                 Stopwatch.GetElapsedTime(requestStarted),
-                response?.Usage,
+                usage,
                 cost?.Value,
                 cost?.Source,
                 result.Success,
