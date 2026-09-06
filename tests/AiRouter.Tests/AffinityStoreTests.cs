@@ -55,6 +55,17 @@ public sealed class AffinityStoreTests
     }
 
     [Fact]
+    public void Non_positive_ttl_is_rejected()
+    {
+        var store = new InMemoryAffinityStore();
+        var target = new ResolvedTarget("p1", "m1");
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.Set("coding", "abc", target, now, TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => store.Set("coding", "abc", target, now, TimeSpan.FromSeconds(-1)));
+    }
+
+    [Fact]
     public void Sticky_strategy_and_option_defaults_match_spec()
     {
         Assert.True(Enum.IsDefined(RoutingStrategy.Sticky));
