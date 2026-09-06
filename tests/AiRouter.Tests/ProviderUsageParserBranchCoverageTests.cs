@@ -55,6 +55,15 @@ public sealed class ProviderUsageParserBranchCoverageTests
     }
 
     [Fact]
+    public void Parse_leaves_total_null_when_output_is_unknown()
+    {
+        var usage = Parse("{\"usage\":{\"input_tokens\":7}}").Value;
+        Assert.Equal(7, usage.InputTokens);
+        Assert.Null(usage.OutputTokens);
+        Assert.Null(usage.TotalTokens);
+    }
+
+    [Fact]
     public void Parse_leaves_total_null_when_one_side_is_unknown_and_rejects_non_integer_tokens()
     {
         var usage = Parse("""
@@ -70,7 +79,7 @@ public sealed class ProviderUsageParserBranchCoverageTests
     public void Parse_handles_numeric_fields_that_are_absent_or_invalid()
     {
         var usage = Parse("""
-        {"usage":{"prompt_tokens_details":{"cached_tokens":"bad"},"input_tokens_details":{"cached_tokens":2.5},"cache_creation_input_tokens":"bad","cache_write_tokens":2.5,"cost":{},"total_tokens":"bad"}}
+        {"usage":{"prompt_tokens_details":{"cached_tokens":"bad"},"input_tokens_details":{"cached_tokens":2.5},"cache_creation_input_tokens":"bad","cache_write_tokens":2.5,"cost":1e1000,"total_tokens":"bad"}}
         """)!;
 
         Assert.Null(usage.InputTokens);
