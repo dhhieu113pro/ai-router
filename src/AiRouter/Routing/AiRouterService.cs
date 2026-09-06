@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using AiRouter.Configuration;
 using AiRouter.Providers;
+using AiRouter.Telemetry;
 
 namespace AiRouter.Routing;
 
@@ -14,14 +15,21 @@ public sealed class AiRouterService : IAiRouter
     private readonly IProviderManager _providers;
     private readonly AiRouterOptions _options;
     private readonly IAffinityStore _affinity;
+    private readonly IRouterTelemetry _telemetry;
     private readonly ConcurrentDictionary<string, int> _roundRobinIndices = new(StringComparer.OrdinalIgnoreCase);
 
-    public AiRouterService(RouteResolver resolver, IProviderManager providers, AiRouterOptions? options = null, IAffinityStore? affinity = null)
+    public AiRouterService(
+        RouteResolver resolver,
+        IProviderManager providers,
+        AiRouterOptions? options = null,
+        IAffinityStore? affinity = null,
+        IRouterTelemetry? telemetry = null)
     {
         _resolver = resolver;
         _providers = providers;
         _options = options ?? new AiRouterOptions();
         _affinity = affinity ?? new InMemoryAffinityStore();
+        _telemetry = telemetry ?? new InMemoryRouterTelemetry(_options.TelemetryRecentCapacity);
     }
 
     public Task<RouterResult> ChatAsync(string model, JsonElement body, bool stream = false, CancellationToken ct = default) =>
@@ -47,12 +55,15 @@ public sealed class AiRouterService : IAiRouter
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        var requestStarted = Stopwatch.GetTimestamp();
 
         ResolvedRoute route;
         try { route = await _resolver.ResolveAsync(model, ct); }
         catch (RouteResolutionException ex)
         {
-            return new RouterResult { Success = false, StatusCode = 400, FailureKind = ProviderFailureKind.InvalidRequest, ErrorMessage = ex.Message };
+            var failure = new RouterResult { Success = false, StatusCode = 400, FailureKind = ProviderFailureKind.InvalidRequest, ErrorMessage = ex.Message };
+            RecordSafe(failure, model, RoutingStrategy.Fallback, false, null, null, requestStarted, 0);
+            return failure;
         }
 
         var resolved = route.Targets
@@ -60,7 +71,12 @@ public sealed class AiRouterService : IAiRouter
             .Where(static item => item.Provider is not null)
             .Select(static item => (item.Target, Provider: item.Provider!))
             .ToArray();
-        if (resolved.Length == 0) return Unavailable("No enabled providers are available for this route.");
+        if (resolved.Length == 0)
+        {
+            var unavailable = Unavailable("No enabled providers are available for this route.");
+            RecordSafe(unavailable, route.RouteId, route.Strategy, route.Pinned, null, null, requestStarted, 0);
+            return unavailable;
+        }
 
         var eligible = resolved.Where(item => !IsCoolingDown(item.Provider)).ToArray();
         if (eligible.Length == 0) eligible = resolved;
@@ -88,15 +104,9 @@ public sealed class AiRouterService : IAiRouter
                     affinityApplied = true;
                     classification = "hit";
                 }
-                else
-                {
-                    classification = "miss";
-                }
+                else classification = "miss";
             }
-            else
-            {
-                classification = string.IsNullOrWhiteSpace(key) ? "route" : "miss";
-            }
+            else classification = string.IsNullOrWhiteSpace(key) ? "route" : "miss";
 
             if (!affinityApplied)
             {
@@ -132,18 +142,65 @@ public sealed class AiRouterService : IAiRouter
                     rebound = attempts > 1 || (priorAffinity is not null && !SameTarget(item.Target, priorAffinity));
                     _affinity.Set(route.RouteId, key, item.Target, DateTimeOffset.UtcNow, _options.StickyAffinityTtl);
                 }
-                return Map(response, item.Target, route, affinityApplied, affinitySource, rebound, attempts > 1, attempts, classification);
+                var mapped = Map(response, item.Target, route, affinityApplied, affinitySource, rebound, attempts > 1, attempts, classification);
+                RecordSafe(mapped, route.RouteId, route.Strategy, route.Pinned, response, item.Target, requestStarted, attempts);
+                return mapped;
             }
 
             MarkFailure(item.Provider, response, latency);
             lastResponse = response;
             lastTarget = item.Target;
             if (response.StreamCommitted || response.FailureKind is ProviderFailureKind.InvalidRequest or ProviderFailureKind.Cancelled)
-                return Map(response, item.Target, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
+            {
+                var terminal = Map(response, item.Target, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
+                RecordSafe(terminal, route.RouteId, route.Strategy, route.Pinned, response, item.Target, requestStarted, attempts);
+                return terminal;
+            }
             if (route.Pinned) break;
         }
 
-        return Map(lastResponse!, lastTarget!, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
+        var result = Map(lastResponse!, lastTarget!, route, affinityApplied, affinitySource, false, attempts > 1, attempts, classification);
+        RecordSafe(result, route.RouteId, route.Strategy, route.Pinned, lastResponse, lastTarget, requestStarted, attempts);
+        return result;
+    }
+
+    private void RecordSafe(
+        RouterResult result,
+        string routeId,
+        RoutingStrategy strategy,
+        bool pinned,
+        ProviderResponse? response,
+        ResolvedTarget? target,
+        long requestStarted,
+        int attempts)
+    {
+        try
+        {
+            var definition = target is null ? null : FindProvider(target.ProviderId)?.Definition;
+            var cost = CostEstimator.Resolve(response?.Usage, definition);
+            _telemetry.Record(new RouterTelemetryRecord(
+                DateTimeOffset.UtcNow,
+                routeId,
+                target?.ProviderId,
+                target?.Model,
+                strategy,
+                pinned,
+                strategy == RoutingStrategy.Sticky,
+                result.FallbackOccurred,
+                result.AffinityClassification,
+                attempts,
+                Stopwatch.GetElapsedTime(requestStarted),
+                response?.Usage,
+                cost?.Value,
+                cost?.Source,
+                result.Success,
+                result.StatusCode,
+                result.FailureKind));
+        }
+        catch
+        {
+            // Telemetry must never affect routing success or failure semantics.
+        }
     }
 
     private static (ResolvedTarget Target, IAiProvider Provider)[] Rotate((ResolvedTarget Target, IAiProvider Provider)[] items, int start) =>
@@ -204,18 +261,37 @@ public sealed class AiRouterService : IAiRouter
                     { health.Status = ProviderStatus.CoolingDown; health.CooldownUntil = now + _options.ErrorCooldown; }
                     else health.Status = ProviderStatus.Degraded;
                     break;
-                case ProviderFailureKind.TargetFailure: health.Status = ProviderStatus.Degraded; break;
+                case ProviderFailureKind.TargetFailure:
+                    health.Status = ProviderStatus.Degraded;
+                    break;
             }
         }
     }
 
     private static RouterResult Map(ProviderResponse response, ResolvedTarget target, ResolvedRoute route, bool applied, string source, bool rebound, bool fallback, int attempts, string classification) => new()
     {
-        Success = response.Success, StatusCode = response.StatusCode, ProviderId = target.ProviderId, Model = target.Model,
-        Body = response.Body, Stream = response.Stream, ContentType = response.ContentType, ErrorMessage = response.ErrorMessage, FailureKind = response.FailureKind,
-        AffinityApplied = applied, AffinitySource = source, AffinityRebound = rebound, FallbackOccurred = fallback, AttemptCount = attempts,
+        Success = response.Success,
+        StatusCode = response.StatusCode,
+        ProviderId = target.ProviderId,
+        Model = target.Model,
+        Body = response.Body,
+        Stream = response.Stream,
+        ContentType = response.ContentType,
+        ErrorMessage = response.ErrorMessage,
+        FailureKind = response.FailureKind,
+        AffinityApplied = applied,
+        AffinitySource = source,
+        AffinityRebound = rebound,
+        FallbackOccurred = fallback,
+        AttemptCount = attempts,
         AffinityClassification = route.Pinned ? "pinned" : classification
     };
 
-    private static RouterResult Unavailable(string message) => new() { Success = false, StatusCode = 503, FailureKind = ProviderFailureKind.ProviderFailure, ErrorMessage = message };
+    private static RouterResult Unavailable(string message) => new()
+    {
+        Success = false,
+        StatusCode = 503,
+        FailureKind = ProviderFailureKind.ProviderFailure,
+        ErrorMessage = message
+    };
 }
