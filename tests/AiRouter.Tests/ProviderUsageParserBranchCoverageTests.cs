@@ -20,7 +20,6 @@ public sealed class ProviderUsageParserBranchCoverageTests
         var usage = Parse("""
         {"usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cached_tokens":2},"cache_write_tokens":4}}
         """)!;
-
         Assert.Equal(7, usage.InputTokens);
         Assert.Equal(3, usage.OutputTokens);
         Assert.Equal(10, usage.TotalTokens);
@@ -34,7 +33,6 @@ public sealed class ProviderUsageParserBranchCoverageTests
         var usage = Parse("""
         {"cost":9.9,"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":11,"prompt_tokens_details":{"cached_tokens":5},"input_tokens_details":{"cached_tokens":1},"cache_creation_input_tokens":6,"cost":0.25}}
         """)!;
-
         Assert.Equal(8, usage.InputTokens);
         Assert.Equal(2, usage.OutputTokens);
         Assert.Equal(11, usage.TotalTokens);
@@ -49,7 +47,6 @@ public sealed class ProviderUsageParserBranchCoverageTests
         var usage = Parse("""
         {"cost":0.5,"usage":{"prompt_tokens":1,"completion_tokens":2,"cost":"unknown","prompt_tokens_details":null,"input_tokens_details":[]}}
         """)!;
-
         Assert.Null(usage.CachedInputTokens);
         Assert.Equal(0.5m, usage.ReportedCost);
     }
@@ -57,7 +54,7 @@ public sealed class ProviderUsageParserBranchCoverageTests
     [Fact]
     public void Parse_leaves_total_null_when_output_is_unknown()
     {
-        var usage = Parse("{\"usage\":{\"input_tokens\":7}}").Value;
+        var usage = Parse("{\"usage\":{\"input_tokens\":7}}")!;
         Assert.Equal(7, usage.InputTokens);
         Assert.Null(usage.OutputTokens);
         Assert.Null(usage.TotalTokens);
@@ -69,7 +66,6 @@ public sealed class ProviderUsageParserBranchCoverageTests
         var usage = Parse("""
         {"usage":{"prompt_tokens":"bad","input_tokens":2147483648,"completion_tokens":2.5,"output_tokens":3}}
         """)!;
-
         Assert.Null(usage.InputTokens);
         Assert.Equal(3, usage.OutputTokens);
         Assert.Null(usage.TotalTokens);
@@ -81,7 +77,6 @@ public sealed class ProviderUsageParserBranchCoverageTests
         var usage = Parse("""
         {"usage":{"prompt_tokens_details":{"cached_tokens":"bad"},"input_tokens_details":{"cached_tokens":2.5},"cache_creation_input_tokens":"bad","cache_write_tokens":2.5,"cost":1e1000,"total_tokens":"bad"}}
         """)!;
-
         Assert.Null(usage.InputTokens);
         Assert.Null(usage.OutputTokens);
         Assert.Null(usage.TotalTokens);
