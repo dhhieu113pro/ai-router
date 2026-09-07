@@ -31,6 +31,18 @@ public sealed class CostEstimatorTests
     }
 
     [Fact]
+    public void Estimate_uses_regular_input_price_when_no_cached_tokens_are_reported()
+    {
+        var usage = new ProviderUsage(1000, 100, 1100, null, null, null);
+        var provider = new ProviderDefinition("p", "p", "fake", "https://example.test", null,
+            InputPricePerMillion: 1m, OutputPricePerMillion: 2m);
+
+        var cost = CostEstimator.Estimate(usage, provider);
+
+        Assert.Equal(0.0012m, cost);
+    }
+
+    [Fact]
     public void Cost_is_null_when_cached_price_is_required_but_missing()
     {
         var usage = new ProviderUsage(1000, 100, 1100, 800, null, null);

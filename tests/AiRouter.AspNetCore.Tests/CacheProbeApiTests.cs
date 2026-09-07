@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using AiRouter.Routing;
 using Microsoft.AspNetCore.Builder;
@@ -50,6 +51,52 @@ public sealed class CacheProbeApiTests
             repeats = 6,
             request = new { messages = Array.Empty<object>() }
         });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Probe_rejects_repeat_count_below_one()
+    {
+        await using var app = await StartAsync(new FakeRouter(Result("p1", 0)));
+        var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+
+        var response = await client.PostAsJsonAsync("/probe/cache", new
+        {
+            model = "coding",
+            repeats = 0,
+            request = new { messages = Array.Empty<object>() }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Probe_rejects_missing_model_or_non_object_request()
+    {
+        await using var app = await StartAsync(new FakeRouter(Result("p1", 0)));
+        var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+
+        var response = await client.PostAsJsonAsync("/probe/cache", new
+        {
+            model = " ",
+            request = new[] { "invalid" }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Probe_rejects_malformed_json()
+    {
+        await using var app = await StartAsync(new FakeRouter(Result("p1", 0)));
+        var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "admin");
+
+        using var content = new StringContent("{not-json", Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("/probe/cache", content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
