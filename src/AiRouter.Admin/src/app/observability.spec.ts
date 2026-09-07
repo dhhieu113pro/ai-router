@@ -173,4 +173,14 @@ describe('cache observability', () => {
     await app.refreshAll();
     expect(app.probeModel).toBe('');
   });
+
+  it('preserves an explicitly selected probe model during refresh', async () => {
+    app.probeModel = 'manual-model';
+    api.listRoutes.mockReturnValueOnce(of([{ id: 'route-x', strategy: 0, enabled: true, targets: [] }]));
+    api.listProviders.mockReturnValueOnce(of([{ id: 'provider-x', name: 'P', type: 'x', baseUrl: 'x', apiKey: null, enabled: true, priority: 1, timeout: null, models: null, defaultModel: null, discoverModels: false, extraHeaders: null, chatEndpoint: null, responsesEndpoint: null, modelsEndpoint: null, supportsNativeResponses: false }]));
+
+    await app.refreshAll();
+
+    expect(app.probeModel).toBe('manual-model');
+  });
 });
